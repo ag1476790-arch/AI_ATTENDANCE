@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+
+{% block title %}OpenCV Theory & Architecture | AI Attendance System{% endblock %}
+
+{% block content %}
+<div class="space-y-8 max-w-5xl mx-auto">
+
+    <!-- Header Section -->
+    <div class="bg-gradient-to-r from-emerald-900/40 via-dark-850 to-dark-850 border border-emerald-500/20 rounded-3xl p-8 relative overflow-hidden">
+        <div class="max-w-3xl space-y-3">
+            <span class="text-xs uppercase font-bold tracking-wider px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                Core Computer Vision Curriculum
+            </span>
+            <h1 class="text-3xl font-extrabold text-white tracking-tight">OpenCV Theory & System Architecture</h1>
+            <p class="text-sm text-slate-300 leading-relaxed">
+                Everything you need for your project viva, viva-voce presentation, and understanding the real-time AI pipeline: from camera matrices to 128-dimensional deep face embeddings.
+            </p>
+        </div>
+    </div>
+
+    <!-- Complete Pipeline Visual Diagram -->
+    <div class="bg-dark-850 rounded-2xl border border-slate-800 p-6 shadow-xl space-y-4">
+        <h2 class="text-base font-bold text-white uppercase tracking-wider flex items-center gap-2">
+            <i class="fa-solid fa-diagram-project text-emerald-400"></i> End-to-End Processing Pipeline
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-6 gap-3 text-center">
+            <!-- Step 1 -->
+            <div class="bg-dark-800/80 p-4 rounded-xl border border-slate-700/60 flex flex-col items-center">
+                <div class="h-10 w-10 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center mb-2 text-lg">
+                    <i class="fa-solid fa-video"></i>
+                </div>
+                <h4 class="text-xs font-bold text-white">1. Capture</h4>
+                <p class="text-[11px] text-slate-400 mt-1 font-mono">VideoCapture(0)</p>
+                <span class="text-[10px] text-slate-500 mt-2">BGR Matrix 640x480</span>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="bg-dark-800/80 p-4 rounded-xl border border-slate-700/60 flex flex-col items-center">
+                <div class="h-10 w-10 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center mb-2 text-lg">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                </div>
+                <h4 class="text-xs font-bold text-white">2. Preprocess</h4>
+                <p class="text-[11px] text-slate-400 mt-1 font-mono">Resize / Blur</p>
+                <span class="text-[10px] text-slate-500 mt-2">Laplacian Liveness</span>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="bg-dark-800/80 p-4 rounded-xl border border-slate-700/60 flex flex-col items-center">
+                <div class="h-10 w-10 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-2 text-lg">
+                    <i class="fa-solid fa-expand"></i>
+                </div>
+                <h4 class="text-xs font-bold text-white">3. Detection</h4>
+                <p class="text-[11px] text-slate-400 mt-1 font-mono">cv2.FaceDetectorYN</p>
+                <span class="text-[10px] text-slate-500 mt-2">(x, y, w, h) + 5 pts</span>
+            </div>
+
+            <!-- Step 4 -->
+            <div class="bg-dark-800/80 p-4 rounded-xl border border-slate-700/60 flex flex-col items-center">
+                <div class="h-10 w-10 rounded-lg bg-teal-500/10 text-teal-400 flex items-center justify-center mb-2 text-lg">
+                    <i class="fa-solid fa-fingerprint"></i>
+                </div>
+                <h4 class="text-xs font-bold text-white">4. Embedding</h4>
+                <p class="text-[11px] text-slate-400 mt-1 font-mono">FaceRecognizerSF</p>
+                <span class="text-[10px] text-slate-500 mt-2">128-D Vector</span>
+            </div>
+
+            <!-- Step 5 -->
+            <div class="bg-dark-800/80 p-4 rounded-xl border border-slate-700/60 flex flex-col items-center">
+                <div class="h-10 w-10 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center mb-2 text-lg">
+                    <i class="fa-solid fa-code-compare"></i>
+                </div>
+                <h4 class="text-xs font-bold text-white">5. Matching</h4>
+                <p class="text-[11px] text-slate-400 mt-1 font-mono">Cosine Metric</p>
+                <span class="text-[10px] text-slate-500 mt-2">Threshold ≥ 0.363</span>
+            </div>
+
+            <!-- Step 6 -->
+            <div class="bg-dark-800/80 p-4 rounded-xl border border-slate-700/60 flex flex-col items-center">
+                <div class="h-10 w-10 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center mb-2 text-lg">
+                    <i class="fa-solid fa-database"></i>
+                </div>
+                <h4 class="text-xs font-bold text-white">6. Attendance</h4>
+                <p class="text-[11px] text-slate-400 mt-1 font-mono">SQLite INSERT</p>
+                <span class="text-[10px] text-slate-500 mt-2">Unique (Roll, Date)</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Theory Breakdown Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+        <!-- Topic 1: Image as a Matrix & BGR Colorspace -->
+        <div class="bg-dark-850 rounded-2xl border border-slate-800 p-6 space-y-3">
+            <div class="flex items-center gap-3">
+                <div class="h-9 w-9 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center">
+                    <i class="fa-solid fa-table-cells"></i>
+                </div>
+                <div>
+                    <h3 class="text-sm font-bold text-white">1. Images as NumPy Pixel Matrices</h3>
+                    <p class="text-[11px] text-slate-400">OpenCV's BGR vs standard RGB</p>
+                </div>
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+                In OpenCV, any digital image is represented as a multidimensional NumPy array with shape <code class="text-emerald-400 bg-dark-900 px-1 py-0.5 rounded font-mono">(Height, Width, Channels)</code>:
+            </p>
+            <div class="bg-dark-900 rounded-xl p-3 border border-slate-800 font-mono text-[11px] text-slate-300">
+                <span class="text-slate-500"># BGR order: Blue (index 0), Green (index 1), Red (index 2)</span><br>
+                pixel = frame[y, x]  <span class="text-slate-500"># [B, G, R] values (0-255)</span><br>
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  <span class="text-slate-500"># 1-channel intensity</span>
+            </div>
+            <p class="text-[11px] text-slate-400">
+                <strong>Why BGR?</strong> Early hardware cameras and graphics cards (like BGR framebuffers) stored blue first for historical reasons. OpenCV maintained this convention for backward compatibility.
+            </p>
+        </div>
+
+        <!-- Topic 2: Real-time Video Stream & Threading -->
+        <div class="bg-dark-850 rounded-2xl border border-slate-800 p-6 space-y-3">
+            <div class="flex items-center gap-3">
+                <div class="h-9 w-9 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center">
+                    <i class="fa-solid fa-film"></i>
+                </div>
+                <div>
+                    <h3 class="text-sm font-bold text-white">2. VideoCapture & Threaded FPS</h3>
+                    <p class="text-[11px] text-slate-400">Handling 30 FPS without blocking the web server</p>
+                </div>
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+                A video is a rapid sequence of still image frames. In Python, calling <code class="text-emerald-400 bg-dark-900 px-1 py-0.5 rounded font-mono">cap.read()</code> is a blocking I/O operation waiting on hardware driver buffers.
+            </p>
+            <div class="bg-dark-900 rounded-xl p-3 border border-slate-800 font-mono text-[11px] text-slate-300">
+                cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)<br>
+                ret, frame = cap.read()<br>
+                <span class="text-slate-500"># Run in dedicated background thread with Lock()</span>
+            </div>
+            <p class="text-[11px] text-slate-400">
+                Our system uses a dedicated <strong>daemon thread</strong> to continuously grab frames, storing only the latest frame in memory. This eliminates hardware buffer delay and ensures smooth 30+ FPS video streaming.
+            </p>
+        </div>
+
+        <!-- Topic 3: Face Detection vs Face Recognition -->
+        <div class="bg-dark-850 rounded-2xl border border-slate-800 p-6 space-y-3">
+            <div class="flex items-center gap-3">
+                <div class="h-9 w-9 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                    <i class="fa-solid fa-magnifying-glass-chart"></i>
+                </div>
+                <div>
+                    <h3 class="text-sm font-bold text-white">3. Face Detection vs Face Recognition</h3>
+                    <p class="text-[11px] text-slate-400">The most important distinction in computer vision</p>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+                <div class="bg-dark-900 p-3 rounded-xl border border-slate-800">
+                    <span class="text-emerald-400 font-bold block mb-1">Face Detection</span>
+                    <span class="text-slate-400 text-[11px]">"Where is a face?"</span>
+                    <p class="text-slate-300 text-[11px] mt-1">Locates bounding box coordinates (x, y, w, h) of any human face.</p>
+                </div>
+                <div class="bg-dark-900 p-3 rounded-xl border border-slate-800">
+                    <span class="text-teal-400 font-bold block mb-1">Face Recognition</span>
+                    <span class="text-slate-400 text-[11px]">"Whose face is this?"</span>
+                    <p class="text-slate-300 text-[11px] mt-1">Extracts identity features and matches against the enrolled student database.</p>
+                </div>
+            </div>
+            <p class="text-[11px] text-slate-400">
+                You cannot recognize a face without first detecting where it is! Detection is step 1; recognition is step 2.
+            </p>
+        </div>
+
+        <!-- Topic 4: Deep Face Embeddings & Cosine Similarity -->
+        <div class="bg-dark-850 rounded-2xl border border-slate-800 p-6 space-y-3">
+            <div class="flex items-center gap-3">
+                <div class="h-9 w-9 rounded-xl bg-teal-500/10 text-teal-400 flex items-center justify-center">
+                    <i class="fa-solid fa-vector-square"></i>
+                </div>
+                <div>
+                    <h3 class="text-sm font-bold text-white">4. Deep Face Embeddings (SFace)</h3>
+                    <p class="text-[11px] text-slate-400">128-dimensional hyperspace vectors</p>
+                </div>
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+                Rather than comparing raw pixels (which fail when lighting or head pose changes), our system uses OpenCV's <strong>SFace deep neural network</strong> to map every face into a 128-dimensional unit vector:
+            </p>
+            <div class="bg-dark-900 rounded-xl p-3 border border-slate-800 font-mono text-[11px] text-slate-300">
+                Rahul &rarr; [0.124, -0.043, 0.812, ..., -0.321] &isin; &reals;<sup>128</sup><br>
+                Cosine Similarity: cos(&theta;) = (A &middot; B) / (||A|| &times; ||B||)<br>
+                <span class="text-slate-500"># Match threshold &ge; 0.363 means same identity!</span>
+            </div>
+            <p class="text-[11px] text-slate-400">
+                Vectors of the same student cluster closely together in space, while different students point in different directions.
+            </p>
+        </div>
+
+        <!-- Topic 5: Bounding Box Coordinates & HUD -->
+        <div class="bg-dark-850 rounded-2xl border border-slate-800 p-6 space-y-3">
+            <div class="flex items-center gap-3">
+                <div class="h-9 w-9 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
+                    <i class="fa-solid fa-draw-polygon"></i>
+                </div>
+                <div>
+                    <h3 class="text-sm font-bold text-white">5. Coordinate System & HUD Drawing</h3>
+                    <p class="text-[11px] text-slate-400">Top-left origin (0, 0) geometry</p>
+                </div>
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+                OpenCV image coordinates start from the top-left: X increases to the right, Y increases downwards.
+            </p>
+            <div class="bg-dark-900 rounded-xl p-3 border border-slate-800 font-mono text-[11px] text-slate-300">
+                <span class="text-slate-500"># Bounding Box: (x, y) = top-left, w = width, h = height</span><br>
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)<br>
+                cv2.putText(frame, "Rahul - Present", (x, y-10), ... )
+            </div>
+            <p class="text-[11px] text-slate-400">
+                We draw rounded tech corners and badge backgrounds to produce a professional heads-up display (HUD).
+            </p>
+        </div>
+
+        <!-- Topic 6: Anti-Spoofing & Attendance Deduplication -->
+        <div class="bg-dark-850 rounded-2xl border border-slate-800 p-6 space-y-3">
+            <div class="flex items-center gap-3">
+                <div class="h-9 w-9 rounded-xl bg-rose-500/10 text-rose-400 flex items-center justify-center">
+                    <i class="fa-solid fa-shield-halved"></i>
+                </div>
+                <div>
+                    <h3 class="text-sm font-bold text-white">6. Liveness & Deduplication Logic</h3>
+                    <p class="text-[11px] text-slate-400">Preventing photo spoofing & duplicate records</p>
+                </div>
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+                To prevent fraud and maintain database integrity:
+            </p>
+            <ul class="text-xs text-slate-300 space-y-1.5 list-disc list-inside">
+                <li><strong>Laplacian Variance:</strong> Measures high-frequency edge texture to detect blurry printed photos.</li>
+                <li><strong>Database UNIQUE(roll_number, date):</strong> Guarantees a student can only be marked present once per calendar day.</li>
+                <li><strong>Memory Cooldown:</strong> 15-second debounce window prevents continuous re-triggering while a student walks through.</li>
+            </ul>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}

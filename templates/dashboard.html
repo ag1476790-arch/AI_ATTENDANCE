@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | AI Real-Time Attendance System{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Top KPI Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Card 1: Total Enrolled -->
+        <div class="bg-dark-850 rounded-2xl p-5 border border-slate-800/80 shadow-lg relative overflow-hidden group hover:border-slate-700 transition-all">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Enrolled</p>
+                    <h3 class="text-3xl font-extrabold text-white mt-1" id="stat-total">{{ stats.total_students }}</h3>
+                    <p class="text-xs text-slate-500 mt-1">Registered in database</p>
+                </div>
+                <div class="h-12 w-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
+                    <i class="fa-solid fa-id-card text-xl"></i>
+                </div>
+            </div>
+            <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-indigo-500"></div>
+        </div>
+
+        <!-- Card 2: Present Today -->
+        <div class="bg-dark-850 rounded-2xl p-5 border border-slate-800/80 shadow-lg relative overflow-hidden group hover:border-slate-700 transition-all">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Present Today</p>
+                    <h3 class="text-3xl font-extrabold text-emerald-400 mt-1" id="stat-present">{{ stats.present_today }}</h3>
+                    <p class="text-xs text-slate-500 mt-1">Verified via facial recognition</p>
+                </div>
+                <div class="h-12 w-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform">
+                    <i class="fa-solid fa-user-check text-xl"></i>
+                </div>
+            </div>
+            <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
+        </div>
+
+        <!-- Card 3: Absent Today -->
+        <div class="bg-dark-850 rounded-2xl p-5 border border-slate-800/80 shadow-lg relative overflow-hidden group hover:border-slate-700 transition-all">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Absent Today</p>
+                    <h3 class="text-3xl font-extrabold text-rose-400 mt-1" id="stat-absent">{{ stats.absent_today }}</h3>
+                    <p class="text-xs text-slate-500 mt-1">Pending attendance</p>
+                </div>
+                <div class="h-12 w-12 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 group-hover:scale-110 transition-transform">
+                    <i class="fa-solid fa-user-xmark text-xl"></i>
+                </div>
+            </div>
+            <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-500 to-pink-500"></div>
+        </div>
+
+        <!-- Card 4: Attendance Rate -->
+        <div class="bg-dark-850 rounded-2xl p-5 border border-slate-800/80 shadow-lg relative overflow-hidden group hover:border-slate-700 transition-all">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Attendance Rate</p>
+                    <h3 class="text-3xl font-extrabold text-amber-400 mt-1" id="stat-rate">{{ stats.attendance_rate }}%</h3>
+                    <p class="text-xs text-slate-500 mt-1">For today ({{ stats.today_date }})</p>
+                </div>
+                <div class="h-12 w-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 group-hover:scale-110 transition-transform">
+                    <i class="fa-solid fa-chart-line text-xl"></i>
+                </div>
+            </div>
+            <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 to-orange-500"></div>
+        </div>
+    </div>
+
+    <!-- Main Section: Live Video Stream & Today's Attendance Feed -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Left Column: Camera Feed & AI Recognition (7 cols) -->
+        <div class="lg:col-span-7 space-y-4">
+            <div class="bg-dark-850 rounded-2xl border border-slate-800/80 shadow-xl overflow-hidden flex flex-col">
+                <!-- Camera Header -->
+                <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-dark-900/60">
+                    <div class="flex items-center space-x-2.5">
+                        <span class="relative flex h-3 w-3">
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                        </span>
+                        <h2 class="text-sm font-bold text-white tracking-wide uppercase">AI Recognition Feed</h2>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                        <span class="text-xs font-mono bg-dark-800 text-emerald-400 px-2.5 py-1 rounded-md border border-slate-700/60" id="fps-badge">
+                            FPS: --
+                        </span>
+                        <button id="toggle-camera-btn" onclick="toggleCamera()" class="text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
+                            <i class="fa-solid fa-power-off text-emerald-400"></i> Toggle Stream
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Video Element Container -->
+                <div class="relative bg-black flex items-center justify-center min-h-[380px] max-h-[480px] overflow-hidden aspect-video">
+                    <img id="camera-stream" src="{{ url_for('video_feed') }}" alt="Live AI Camera Feed" class="w-full h-full object-contain">
+                    
+                    <!-- Overlay Scanlines / Grid Effect -->
+                    <div class="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_40%,rgba(0,0,0,0.6)_100%)]"></div>
+
+                    <!-- AI Status Tag Bar in Video -->
+                    <div class="absolute bottom-3 left-3 right-3 bg-dark-900/80 backdrop-blur-md border border-slate-700/60 rounded-xl px-4 py-2 flex items-center justify-between text-xs">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-brain text-emerald-400 animate-pulse"></i>
+                            <span class="text-slate-300" id="live-event-msg">Scanning for faces...</span>
+                        </div>
+                        <span class="text-slate-400 font-mono text-[11px]" id="live-event-time">--:--:--</span>
+                    </div>
+                </div>
+
+                <!-- Live Pipeline Indicator -->
+                <div class="p-4 bg-dark-900/40 border-t border-slate-800/80 flex items-center justify-around text-xs text-slate-400">
+                    <div class="flex items-center gap-1.5">
+                        <i class="fa-solid fa-camera text-slate-500"></i>
+                        <span>Webcam</span>
+                    </div>
+                    <i class="fa-solid fa-arrow-right text-slate-600 text-[10px]"></i>
+                    <div class="flex items-center gap-1.5">
+                        <i class="fa-solid fa-draw-polygon text-emerald-500"></i>
+                        <span>YuNet Detect</span>
+                    </div>
+                    <i class="fa-solid fa-arrow-right text-slate-600 text-[10px]"></i>
+                    <div class="flex items-center gap-1.5">
+                        <i class="fa-solid fa-fingerprint text-teal-400"></i>
+                        <span>SFace 128D</span>
+                    </div>
+                    <i class="fa-solid fa-arrow-right text-slate-600 text-[10px]"></i>
+                    <div class="flex items-center gap-1.5">
+                        <i class="fa-solid fa-database text-blue-400"></i>
+                        <span>SQLite Log</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Action Alert -->
+            <div class="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="h-9 w-9 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+                        <i class="fa-solid fa-shield-check text-sm"></i>
+                    </div>
+                    <div>
+                        <h4 class="text-xs font-semibold text-emerald-300">Duplicate Punch Protection Active</h4>
+                        <p class="text-[11px] text-slate-400">Students already marked today are verified without duplicate entries.</p>
+                    </div>
+                </div>
+                <a href="{{ url_for('students') }}" class="text-xs bg-emerald-500 hover:bg-emerald-600 text-white font-medium px-3.5 py-1.5 rounded-lg shadow-sm transition">
+                    + Register Student
+                </a>
+            </div>
+        </div>
+
+        <!-- Right Column: Today's Real-time Attendance Feed (5 cols) -->
+        <div class="lg:col-span-5 flex flex-col">
+            <div class="bg-dark-850 rounded-2xl border border-slate-800/80 shadow-xl flex-1 flex flex-col overflow-hidden">
+                <!-- Header -->
+                <div class="p-4 border-b border-slate-800 bg-dark-900/60 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                            <span>Today's Attendance</span>
+                            <span class="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-mono font-normal" id="today-count-badge">
+                                {{ today_records|length }}
+                            </span>
+                        </h2>
+                        <p class="text-xs text-slate-400">{{ stats.today_date }}</p>
+                    </div>
+                    
+                    <a href="{{ url_for('export_csv') }}" class="text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-700/60 transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-arrow-down text-emerald-400"></i> Export
+                    </a>
+                </div>
+
+                <!-- Search Input -->
+                <div class="p-3 border-b border-slate-800/80 bg-dark-900/30">
+                    <div class="relative">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-xs text-slate-500"></i>
+                        <input type="text" id="today-search" placeholder="Search by name, roll, or department..." onkeyup="filterTodayTable()"
+                               class="w-full bg-dark-800 border border-slate-700/60 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500/80 transition">
+                    </div>
+                </div>
+
+                <!-- Real-time Attendance Scrollable Table -->
+                <div class="flex-1 overflow-y-auto max-h-[460px] divide-y divide-slate-800/60" id="attendance-feed-list">
+                    {% if today_records %}
+                        {% for record in today_records %}
+                        <div class="p-3.5 hover:bg-slate-800/30 transition flex items-center justify-between attendance-row"
+                             data-search="{{ record.name|lower }} {{ record.roll_number|lower }} {{ record.department|lower }}">
+                            <div class="flex items-center space-x-3">
+                                {% if record.photo_path %}
+                                <img src="/dataset/{{ record.roll_number }}.jpg" alt="{{ record.name }}" class="h-10 w-10 rounded-full object-cover border border-slate-700">
+                                {% else %}
+                                <div class="h-10 w-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-slate-300">
+                                    {{ record.name[:2]|upper }}
+                                </div>
+                                {% endif %}
+                                <div>
+                                    <h4 class="text-xs font-bold text-white">{{ record.name }}</h4>
+                                    <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
+                                        <span class="font-mono text-emerald-400 font-semibold">{{ record.roll_number }}</span>
+                                        <span>&bull;</span>
+                                        <span>{{ record.department }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    <i class="fa-solid fa-check text-[9px] mr-1"></i> {{ record.status }}
+                                </span>
+                                <p class="text-[11px] font-mono text-slate-400 mt-1">{{ record.time }}</p>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="p-8 text-center" id="empty-state">
+                            <div class="h-12 w-12 rounded-full bg-slate-800/60 flex items-center justify-center text-slate-500 mx-auto mb-2">
+                                <i class="fa-solid fa-user-clock text-xl"></i>
+                            </div>
+                            <p class="text-xs font-semibold text-slate-400">No attendance marked yet today</p>
+                            <p class="text-[11px] text-slate-500 mt-0.5">Students appearing before the camera will appear here automatically.</p>
+                        </div>
+                    {% endif %}
+                </div>
+
+                <!-- Footer Summary -->
+                <div class="p-3 bg-dark-900/60 border-t border-slate-800 text-xs text-slate-500 text-center">
+                    Auto-updates live as faces are recognized
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Live polling for dashboard stats & attendance updates
+    let pollInterval = setInterval(updateLiveFeed, 2000);
+
+    function updateLiveFeed() {
+        fetch('/api/live_status')
+            .then(res => res.json())
+            .then(data => {
+                if (data.fps !== undefined) {
+                    document.getElementById('fps-badge').innerText = `FPS: ${data.fps}`;
+                }
+                if (data.event) {
+                    document.getElementById('live-event-msg').innerText = data.event.message;
+                    document.getElementById('live-event-time').innerText = data.event.timestamp;
+                }
+                if (data.stats) {
+                    document.getElementById('stat-total').innerText = data.stats.total_students;
+                    document.getElementById('stat-present').innerText = data.stats.present_today;
+                    document.getElementById('stat-absent').innerText = data.stats.absent_today;
+                    document.getElementById('stat-rate').innerText = `${data.stats.attendance_rate}%`;
+                }
+                if (data.today_attendance) {
+                    renderTodayAttendance(data.today_attendance);
+                }
+            })
+            .catch(err => console.log('Polling status:', err));
+    }
+
+    function renderTodayAttendance(records) {
+        const container = document.getElementById('attendance-feed-list');
+        const badge = document.getElementById('today-count-badge');
+        badge.innerText = records.length;
+
+        if (records.length === 0) {
+            container.innerHTML = `
+                <div class="p-8 text-center" id="empty-state">
+                    <div class="h-12 w-12 rounded-full bg-slate-800/60 flex items-center justify-center text-slate-500 mx-auto mb-2">
+                        <i class="fa-solid fa-user-clock text-xl"></i>
+                    </div>
+                    <p class="text-xs font-semibold text-slate-400">No attendance marked yet today</p>
+                    <p class="text-[11px] text-slate-500 mt-0.5">Students appearing before the camera will appear here automatically.</p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = '';
+        records.forEach(r => {
+            const avatar = r.photo_path 
+                ? `<img src="/dataset/${r.roll_number}.jpg" alt="${r.name}" class="h-10 w-10 rounded-full object-cover border border-slate-700">`
+                : `<div class="h-10 w-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-slate-300">${r.name.slice(0, 2).toUpperCase()}</div>`;
+
+            html += `
+                <div class="p-3.5 hover:bg-slate-800/30 transition flex items-center justify-between attendance-row"
+                     data-search="${r.name.toLowerCase()} ${r.roll_number.toLowerCase()} ${r.department.toLowerCase()}">
+                    <div class="flex items-center space-x-3">
+                        ${avatar}
+                        <div>
+                            <h4 class="text-xs font-bold text-white">${r.name}</h4>
+                            <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
+                                <span class="font-mono text-emerald-400 font-semibold">${r.roll_number}</span>
+                                <span>&bull;</span>
+                                <span>${r.department}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <i class="fa-solid fa-check text-[9px] mr-1"></i> ${r.status}
+                        </span>
+                        <p class="text-[11px] font-mono text-slate-400 mt-1">${r.time}</p>
+                    </div>
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+        filterTodayTable(); // Preserve active search filter
+    }
+
+    function filterTodayTable() {
+        const query = document.getElementById('today-search').value.toLowerCase();
+        const rows = document.querySelectorAll('.attendance-row');
+        rows.forEach(row => {
+            const searchData = row.getAttribute('data-search');
+            row.style.display = searchData.includes(query) ? 'flex' : 'none';
+        });
+    }
+
+    function toggleCamera() {
+        fetch('/api/toggle_camera', { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                showToast(data.message, data.status ? 'success' : 'info');
+                const streamImg = document.getElementById('camera-stream');
+                if (data.status) {
+                    streamImg.src = "{{ url_for('video_feed') }}?t=" + new Date().getTime();
+                }
+            });
+    }
+</script>
+{% endblock %}
