@@ -2,7 +2,6 @@ import cv2
 import time
 import threading
 from datetime import datetime, date
-import numpy as np
 
 import database
 from face_recognition import FaceEngine
@@ -194,33 +193,6 @@ class AttendanceSystem:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
 
         return frame
-
-    def generate_video_stream(self):
-        """Yields JPEG multipart frames for Flask /video_feed."""
-        # Ensure camera is started
-        if not self.video_stream.is_running:
-            self.start_camera()
-
-        while True:
-            frame = self.video_stream.read()
-            if frame is None:
-                # If camera is not ready, generate placeholder frame
-                placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
-                cv2.putText(placeholder, "Connecting to camera / Camera offline...", (80, 240),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (180, 180, 180), 2)
-                ret, jpeg = cv2.imencode('.jpg', placeholder)
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
-                time.sleep(0.1)
-                continue
-
-            processed = self.process_frame(frame)
-            ret, jpeg = cv2.imencode('.jpg', processed, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            if not ret:
-                continue
-
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
 
 # Global singleton
 attendance_system = AttendanceSystem()

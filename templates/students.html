@@ -150,6 +150,7 @@
                 <!-- Face Capture Section -->
                 <div class="mt-4 pt-4 border-t border-slate-800 space-y-3">
                     <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">Face Enrollment Method *</label>
+                    <p class="text-[11px] text-slate-500">Camera photos are sent to the server to create and store the student's face template.</p>
                     
                     <div class="grid grid-cols-2 gap-2">
                         <button type="button" id="tab-webcam" onclick="switchCaptureMode('webcam')" class="p-2.5 rounded-xl border border-emerald-500 bg-emerald-500/10 text-emerald-400 text-xs font-semibold flex items-center justify-center gap-1.5 transition">
@@ -165,8 +166,6 @@
                         <div class="relative bg-black rounded-xl overflow-hidden aspect-video border border-slate-700 flex items-center justify-center min-h-[220px]">
                             <!-- Browser Video Stream -->
                             <video id="modal-video" autoplay playsinline muted class="w-full h-full object-cover"></video>
-                            <!-- Backend OpenCV Stream Image Fallback -->
-                            <img id="modal-backend-stream" src="{{ url_for('video_feed') }}" class="w-full h-full object-cover hidden" alt="Live Feed Preview">
                             <canvas id="modal-canvas" class="hidden"></canvas>
 
                             <!-- Captured Snapshot Preview Overlay -->
@@ -228,7 +227,6 @@
     let currentMode = 'webcam';
     let capturedBase64 = null;
     let capturedSamples = [];
-    let usingBackendFallback = false;
 
     function showModalAlert(msg, type = 'error') {
         const el = document.getElementById('enroll-modal-alert');
@@ -286,34 +284,29 @@
 
     function startModalWebcam() {
         const video = document.getElementById('modal-video');
-        const backendImg = document.getElementById('modal-backend-stream');
-
-        // Try browser getUserMedia first
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
-                .then(stream => {
-                    modalStream = stream;
-                    video.srcObject = stream;
-                    video.classList.remove('hidden');
-                    backendImg.classList.add('hidden');
-                    usingBackendFallback = false;
-                })
-                .catch(err => {
-                    console.log("Browser camera locked or unavailable, using backend stream fallback:", err);
-                    useBackendCameraStream();
-                });
-        } else {
-            useBackendCameraStream();
+        if (modalStream) return;
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            showModalAlert("Camera access requires HTTPS and a supported browser. You can upload a face image instead.", "error");
+            return;
         }
-    }
-
-    function useBackendCameraStream() {
-        usingBackendFallback = true;
-        const video = document.getElementById('modal-video');
-        const backendImg = document.getElementById('modal-backend-stream');
-        video.classList.add('hidden');
-        backendImg.src = "{{ url_for('video_feed') }}?t=" + new Date().getTime();
-        backendImg.classList.remove('hidden');
+        navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
+        }).then(stream => {
+            modalStream = stream;
+            video.srcObject = stream;
+            video.classList.remove('hidden');
+            video.play().catch(error => {
+                console.error("Could not start enrollment camera preview:", error);
+                showModalAlert("Could not start the camera preview. Please try again or upload an image.", "error");
+            });
+        }).catch(error => {
+            console.error("Could not access enrollment camera:", error);
+            const message = error.name === 'NotAllowedError'
+                ? "Camera permission was denied. Allow camera access in your browser or upload an image."
+                : "Could not access the device camera. Check that it is connected and not in use, or upload an image.";
+            showModalAlert(message, "error");
+        });
     }
 
     function stopModalWebcam() {
@@ -321,14 +314,15 @@
             modalStream.getTracks().forEach(track => track.stop());
             modalStream = null;
         }
+        const video = document.getElementById('modal-video');
+        if (video) video.srcObject = null;
     }
 
     async function getSnapshotFromCamera() {
         const video = document.getElementById('modal-video');
         const canvas = document.getElementById('modal-canvas');
 
-        // If browser video is active and has valid dimensions
-        if (!usingBackendFallback && video && video.videoWidth > 0) {
+        if (video && video.videoWidth > 0 && modalStream) {
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             const ctx = canvas.getContext('2d');
@@ -336,19 +330,7 @@
             return canvas.toDataURL('image/jpeg', 0.92);
         }
 
-        // Otherwise fetch high quality frame directly from OpenCV backend
-        try {
-            const res = await fetch('/api/camera_snapshot');
-            const data = await res.json();
-            if (data.status && data.image) {
-                return data.image;
-            } else {
-                throw new Error(data.message || "Camera snapshot failed");
-            }
-        } catch (e) {
-            console.error("Camera snapshot error:", e);
-            return null;
-        }
+        return null;
     }
 
     async function captureSnapshot() {

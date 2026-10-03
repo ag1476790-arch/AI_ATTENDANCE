@@ -4,6 +4,7 @@ import re
 import csv
 import base64
 from datetime import datetime
+from threading import Lock
 
 import cv2
 import numpy as np
@@ -30,6 +31,7 @@ if not database.has_admin_accounts():
 
 DATASET_DIR = os.path.join(os.path.dirname(__file__), 'dataset')
 os.makedirs(DATASET_DIR, exist_ok=True)
+frame_processing_lock = Lock()
 
 # ----------------------------------------------------
 # Static Image Serving for Dataset
@@ -120,16 +122,6 @@ def theory():
     return render_template('theory.html', active_page='theory', admin_user=session.get('admin_user', 'Admin'))
 
 # ----------------------------------------------------
-# Video Streaming Route
-# ----------------------------------------------------
-@app.route('/video_feed')
-def video_feed():
-    return Response(
-        attendance_system.generate_video_stream(),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
-    )
-
-# ----------------------------------------------------
 # REST API Endpoints
 # ----------------------------------------------------
 @app.route('/api/live_status')
@@ -144,37 +136,46 @@ def api_live_status():
         'today_attendance': today_attendance
     })
 
-@app.route('/api/toggle_camera', methods=['POST'])
-def api_toggle_camera():
-    """Toggles hardware webcam on/off."""
-    if attendance_system.video_stream.is_running:
-        attendance_system.stop_camera()
-        return jsonify({'status': False, 'message': 'Camera turned OFF'})
-    else:
-        started = attendance_system.start_camera()
-        return jsonify({
-            'status': started, 
-            'message': 'Camera turned ON' if started else 'Failed to access camera'
-        })
+@app.route('/api/process_frame', methods=['POST'])
+def api_process_frame():
+    """Process a JPEG frame captured by the user's browser camera."""
+    if request.content_length and request.content_length > 1_500_000:
+        return jsonify({'status': False, 'message': 'The camera frame is too large.'}), 413
 
-@app.route('/api/camera_snapshot')
-def api_camera_snapshot():
-    """Captures a snapshot JPEG frame directly from OpenCV stream without browser camera locks."""
-    import time
-    if not attendance_system.video_stream.is_running:
-        attendance_system.start_camera()
-        time.sleep(0.4)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get('image'), str):
+        return jsonify({'status': False, 'message': 'A base64 JPEG image is required.'}), 400
 
-    frame = attendance_system.video_stream.read()
+    image_data = data['image']
+    if image_data.startswith('data:'):
+        header, separator, image_data = image_data.partition(',')
+        if not separator or header.lower() != 'data:image/jpeg;base64':
+            return jsonify({'status': False, 'message': 'Only base64 JPEG frames are accepted.'}), 400
+
+    if not image_data or len(image_data) > 1_000_000:
+        return jsonify({'status': False, 'message': 'The camera frame is empty or too large.'}), 413
+
+    try:
+        image_bytes = base64.b64decode(image_data, validate=True)
+    except (ValueError, base64.binascii.Error):
+        return jsonify({'status': False, 'message': 'The camera frame is not valid base64 data.'}), 400
+
+    frame = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
-        return jsonify({'status': False, 'message': 'Camera not available. Please check webcam or upload an image.'}), 400
+        return jsonify({'status': False, 'message': 'The camera frame is not a valid JPEG image.'}), 400
 
-    ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
-    if not ret:
-        return jsonify({'status': False, 'message': 'Failed to encode frame.'}), 500
+    height, width = frame.shape[:2]
+    if width > 1280 or height > 960:
+        return jsonify({'status': False, 'message': 'Camera frames must be at most 1280x960.'}), 400
 
-    b64_str = "data:image/jpeg;base64," + base64.b64encode(jpeg.tobytes()).decode('utf-8')
-    return jsonify({'status': True, 'image': b64_str})
+    try:
+        with frame_processing_lock:
+            attendance_system.process_frame(frame)
+    except Exception:
+        app.logger.exception("Failed to process a browser camera frame")
+        return jsonify({'status': False, 'message': 'The server could not process the camera frame.'}), 500
+
+    return jsonify({'status': True, 'fps': attendance_system.fps})
 
 @app.route('/api/register_student', methods=['POST'])
 def api_register_student():

@@ -90,7 +90,7 @@ AI_Attendance/
 2. Render reads `render.yaml` and configures the build and start commands. Enter values for `ADMIN_USERNAME` and `ADMIN_PASSWORD` when prompted; Render generates `FLASK_SECRET_KEY`.
 3. Deploy the free web service.
 
-The free service uses temporary storage, so attendance records and enrolled students may be lost when it restarts. Render also cannot access your personal computer's webcam; connect a supported network camera before using live recognition there.
+The free service uses temporary storage, so attendance records and enrolled students may be lost when it restarts. Live recognition requests permission to use the browser device camera and sends sampled frames to the server over HTTPS for processing. Keep in mind that the free service's limited CPU may make recognition slower than running locally.
 
 ### Option 1: Web Dashboard (Recommended)
 

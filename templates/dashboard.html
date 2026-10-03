@@ -77,10 +77,7 @@
                 <!-- Camera Header -->
                 <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-dark-900/60">
                     <div class="flex items-center space-x-2.5">
-                        <span class="relative flex h-3 w-3">
-                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                            <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-                        </span>
+                        <span id="camera-status-indicator" class="relative inline-flex rounded-full h-3 w-3 bg-slate-500"></span>
                         <h2 class="text-sm font-bold text-white tracking-wide uppercase">AI Recognition Feed</h2>
                     </div>
 
@@ -89,14 +86,14 @@
                             FPS: --
                         </span>
                         <button id="toggle-camera-btn" onclick="toggleCamera()" class="text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
-                            <i class="fa-solid fa-power-off text-emerald-400"></i> Toggle Stream
+                            <i class="fa-solid fa-camera text-emerald-400"></i> Start Camera
                         </button>
                     </div>
                 </div>
 
                 <!-- Video Element Container -->
                 <div class="relative bg-black flex items-center justify-center min-h-[380px] max-h-[480px] overflow-hidden aspect-video">
-                    <img id="camera-stream" src="{{ url_for('video_feed') }}" alt="Live AI Camera Feed" class="w-full h-full object-contain">
+                    <video id="camera-stream" autoplay playsinline muted class="w-full h-full object-contain"></video>
                     
                     <!-- Overlay Scanlines / Grid Effect -->
                     <div class="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_40%,rgba(0,0,0,0.6)_100%)]"></div>
@@ -110,12 +107,15 @@
                         <span class="text-slate-400 font-mono text-[11px]" id="live-event-time">--:--:--</span>
                     </div>
                 </div>
+                <p class="px-4 py-2 text-[11px] text-slate-500 bg-dark-900/40">
+                    Camera frames are sent to the server for face recognition. Video starts only after you select Start Camera and grant browser permission.
+                </p>
 
                 <!-- Live Pipeline Indicator -->
                 <div class="p-4 bg-dark-900/40 border-t border-slate-800/80 flex items-center justify-around text-xs text-slate-400">
                     <div class="flex items-center gap-1.5">
                         <i class="fa-solid fa-camera text-slate-500"></i>
-                        <span>Webcam</span>
+                        <span>Browser camera</span>
                     </div>
                     <i class="fa-solid fa-arrow-right text-slate-600 text-[10px]"></i>
                     <div class="flex items-center gap-1.5">
@@ -236,6 +236,11 @@
 
 {% block scripts %}
 <script>
+    let dashboardCameraStream = null;
+    let dashboardCameraRunning = false;
+    let dashboardFrameTimer = null;
+    let dashboardFrameCanvas = null;
+
     // Live polling for dashboard stats & attendance updates
     let pollInterval = setInterval(updateLiveFeed, 2000);
 
@@ -323,16 +328,101 @@
         });
     }
 
-    function toggleCamera() {
-        fetch('/api/toggle_camera', { method: 'POST' })
-            .then(res => res.json())
-            .then(data => {
-                showToast(data.message, data.status ? 'success' : 'info');
-                const streamImg = document.getElementById('camera-stream');
-                if (data.status) {
-                    streamImg.src = "{{ url_for('video_feed') }}?t=" + new Date().getTime();
-                }
+    async function toggleCamera() {
+        if (dashboardCameraRunning) {
+            stopDashboardCamera();
+            return;
+        }
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            showToast("Camera access requires a secure HTTPS page and a supported browser.", "error");
+            return;
+        }
+
+        const button = document.getElementById('toggle-camera-btn');
+        button.disabled = true;
+        try {
+            dashboardCameraStream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
             });
+            const video = document.getElementById('camera-stream');
+            video.srcObject = dashboardCameraStream;
+            await video.play();
+            dashboardCameraStream.getVideoTracks()[0].addEventListener('ended', () => {
+                if (dashboardCameraRunning) {
+                    stopDashboardCamera();
+                    showToast("The device camera was disconnected.", "warning");
+                }
+            }, { once: true });
+            dashboardFrameCanvas = document.createElement('canvas');
+            dashboardCameraRunning = true;
+            button.innerHTML = '<i class="fa-solid fa-power-off text-rose-400"></i> Stop Camera';
+            document.getElementById('camera-status-indicator').className =
+                'relative inline-flex rounded-full h-3 w-3 bg-emerald-500';
+            showToast("Camera started. Frames are sent to the server for recognition.", "success");
+            processDashboardFrame();
+        } catch (error) {
+            stopDashboardCamera();
+            const reason = error.name === 'NotAllowedError'
+                ? "Camera permission was denied. Allow camera access in your browser and try again."
+                : "Could not start the device camera. Check that it is connected and not in use.";
+            showToast(reason, "error");
+        } finally {
+            button.disabled = false;
+        }
     }
+
+    async function processDashboardFrame() {
+        if (!dashboardCameraRunning) return;
+        const video = document.getElementById('camera-stream');
+        if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0) {
+            const scale = Math.min(1, 640 / video.videoWidth, 480 / video.videoHeight);
+            dashboardFrameCanvas.width = Math.round(video.videoWidth * scale);
+            dashboardFrameCanvas.height = Math.round(video.videoHeight * scale);
+            dashboardFrameCanvas.getContext('2d').drawImage(
+                video, 0, 0, dashboardFrameCanvas.width, dashboardFrameCanvas.height
+            );
+
+            try {
+                const response = await fetch('/api/process_frame', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: dashboardFrameCanvas.toDataURL('image/jpeg', 0.65) })
+                });
+                const result = await response.json();
+                if (!response.ok || !result.status) {
+                    throw new Error(result.message || "Camera frame processing failed.");
+                }
+            } catch (error) {
+                stopDashboardCamera();
+                showToast(error.message || "Lost connection while processing camera frames.", "error");
+                return;
+            }
+        }
+        if (dashboardCameraRunning) {
+            dashboardFrameTimer = setTimeout(processDashboardFrame, 300);
+        }
+    }
+
+    function stopDashboardCamera() {
+        dashboardCameraRunning = false;
+        clearTimeout(dashboardFrameTimer);
+        if (dashboardCameraStream) {
+            dashboardCameraStream.getTracks().forEach(track => track.stop());
+            dashboardCameraStream = null;
+        }
+        const video = document.getElementById('camera-stream');
+        if (video) video.srcObject = null;
+        const button = document.getElementById('toggle-camera-btn');
+        if (button) {
+            button.innerHTML = '<i class="fa-solid fa-camera text-emerald-400"></i> Start Camera';
+            button.disabled = false;
+        }
+        const indicator = document.getElementById('camera-status-indicator');
+        if (indicator) indicator.className = 'relative inline-flex rounded-full h-3 w-3 bg-slate-500';
+    }
+
+    window.addEventListener('pagehide', stopDashboardCamera);
 </script>
 {% endblock %}
