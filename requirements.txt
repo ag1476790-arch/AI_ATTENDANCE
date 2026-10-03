@@ -6,6 +6,7 @@ numpy>=1.24.0
 # Web Dashboard & Backend Server
 Flask>=3.0.0
 Jinja2>=3.1.0
+gunicorn>=22.0.0
 
 # Reports & Data Analysis
 pandas>=2.0.0

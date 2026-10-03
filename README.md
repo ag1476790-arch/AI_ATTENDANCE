@@ -84,6 +84,14 @@ AI_Attendance/
 
 ## ⚡ How to Run
 
+### Deploy on Render
+
+1. In Render, choose **New** &rarr; **Blueprint** and connect this GitHub repository. Leave **Root Directory** blank.
+2. Render reads `render.yaml` and configures the build and start commands. Enter values for `ADMIN_USERNAME` and `ADMIN_PASSWORD` when prompted; Render generates `FLASK_SECRET_KEY`.
+3. Deploy the free web service.
+
+The free service uses temporary storage, so attendance records and enrolled students may be lost when it restarts. Render also cannot access your personal computer's webcam; connect a supported network camera before using live recognition there.
+
 ### Option 1: Web Dashboard (Recommended)
 
 1. Open PowerShell in `e:\AI_Attendence_system`.
