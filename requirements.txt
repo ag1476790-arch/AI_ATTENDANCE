@@ -1,0 +1,13 @@
+# Core Computer Vision & Deep Learning
+opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0
+numpy>=1.24.0
+
+# Web Dashboard & Backend Server
+Flask>=3.0.0
+Jinja2>=3.1.0
+
+# Reports & Data Analysis
+pandas>=2.0.0
+openpyxl>=3.1.0
+requests>=2.31.0

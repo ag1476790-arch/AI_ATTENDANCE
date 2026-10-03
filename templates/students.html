@@ -1,0 +1,563 @@
+{% extends "base.html" %}
+
+{% block title %}Student Enrollment | AI Real-Time Attendance System{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Header & Register Action -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-white tracking-tight">Student Enrollment & Directory</h1>
+            <p class="text-xs text-slate-400 mt-1">Manage registered students and enroll facial biometric vectors.</p>
+        </div>
+        <button onclick="openEnrollModal()" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 transition">
+            <i class="fa-solid fa-user-plus text-sm"></i> Register New Student
+        </button>
+    </div>
+
+    <!-- Student Cards / Table Section -->
+    <div class="bg-dark-850 rounded-2xl border border-slate-800/80 shadow-xl overflow-hidden">
+        <!-- Search and Filter Toolbar -->
+        <div class="p-4 border-b border-slate-800 bg-dark-900/40 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="relative w-full sm:w-80">
+                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-xs text-slate-500"></i>
+                <input type="text" id="student-search-input" placeholder="Search by name, roll number, department..." onkeyup="filterStudentList()"
+                       class="w-full bg-dark-800 border border-slate-700/60 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
+            </div>
+            <div class="text-xs text-slate-400">
+                Total Enrolled: <span class="font-bold text-emerald-400 font-mono" id="total-count">{{ students|length }}</span>
+            </div>
+        </div>
+
+        <!-- Student List -->
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-300">
+                <thead class="bg-dark-900/60 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                    <tr>
+                        <th class="px-5 py-3.5">Student</th>
+                        <th class="px-5 py-3.5">Roll Number</th>
+                        <th class="px-5 py-3.5">Department</th>
+                        <th class="px-5 py-3.5">Face Biometric</th>
+                        <th class="px-5 py-3.5">Registered On</th>
+                        <th class="px-5 py-3.5 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60" id="student-table-body">
+                    {% if students %}
+                        {% for s in students %}
+                        <tr class="hover:bg-slate-800/30 transition student-row" 
+                            data-search="{{ s.name|lower }} {{ s.roll_number|lower }} {{ s.department|lower }}">
+                            <td class="px-5 py-3.5 flex items-center space-x-3">
+                                {% if s.photo_path %}
+                                <img src="/dataset/{{ s.roll_number }}.jpg" alt="{{ s.name }}" class="h-10 w-10 rounded-full object-cover border border-slate-700 shadow" onerror="this.onerror=null; this.src=''; this.parentElement.innerHTML='<div class=\'h-10 w-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-slate-300\'>{{ s.name[:2]|upper }}</div>';">
+                                {% else %}
+                                <div class="h-10 w-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-slate-300">
+                                    {{ s.name[:2]|upper }}
+                                </div>
+                                {% endif %}
+                                <div>
+                                    <div class="font-bold text-white text-xs">{{ s.name }}</div>
+                                    <div class="text-[11px] text-slate-500">{{ s.email if s.email else 'No email' }}</div>
+                                </div>
+                            </td>
+                            <td class="px-5 py-3.5 font-mono text-emerald-400 font-semibold">{{ s.roll_number }}</td>
+                            <td class="px-5 py-3.5 text-slate-300">{{ s.department }}</td>
+                            <td class="px-5 py-3.5">
+                                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    <i class="fa-solid fa-fingerprint text-[10px]"></i> SFace 128D Active
+                                </span>
+                            </td>
+                            <td class="px-5 py-3.5 text-slate-400 font-mono text-[11px]">{{ s.created_at[:10] }}</td>
+                            <td class="px-5 py-3.5 text-right">
+                                <button onclick="deleteStudent('{{ s.roll_number }}', '{{ s.name }}')" class="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 p-2 rounded-lg transition" title="Delete Student">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="6" class="px-5 py-12 text-center text-slate-500">
+                                <i class="fa-solid fa-user-group text-3xl mb-2 text-slate-600"></i>
+                                <p class="text-xs">No registered students yet.</p>
+                                <p class="text-[11px] text-slate-600 mt-1">Click "Register New Student" to enroll your first student.</p>
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- Student Registration Modal -->
+<div id="enroll-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-dark-900 border border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+        <!-- Modal Header -->
+        <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-dark-850">
+            <div class="flex items-center space-x-2.5">
+                <div class="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                    <i class="fa-solid fa-id-badge text-sm"></i>
+                </div>
+                <h3 class="text-sm font-bold text-white">Enroll New Student Face</h3>
+            </div>
+            <button onclick="closeEnrollModal()" class="text-slate-400 hover:text-white text-sm">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="p-5 overflow-y-auto space-y-4">
+            <!-- Alert Banner inside Modal -->
+            <div id="enroll-modal-alert" class="hidden p-3 rounded-xl text-xs flex items-center gap-2"></div>
+
+            <form id="enroll-form" onsubmit="submitEnrollment(event)">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Full Name *</label>
+                        <input type="text" id="reg-name" required placeholder="e.g. Rahul Sharma"
+                               class="w-full bg-dark-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Roll Number *</label>
+                        <input type="text" id="reg-roll" required placeholder="e.g. 23 or CS-101"
+                               class="w-full bg-dark-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 uppercase">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Department *</label>
+                        <select id="reg-dept" required class="w-full bg-dark-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+                            <option value="Computer Science">Computer Science & Eng</option>
+                            <option value="Information Tech">Information Technology</option>
+                            <option value="AI & Data Science">AI & Data Science</option>
+                            <option value="Electronics & Comm">Electronics & Comm</option>
+                            <option value="Mechanical Eng">Mechanical Engineering</option>
+                            <option value="Civil Eng">Civil Engineering</option>
+                            <option value="Electrical Eng">Electrical Engineering</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Email (Optional)</label>
+                        <input type="email" id="reg-email" placeholder="student@college.edu"
+                               class="w-full bg-dark-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+                    </div>
+                </div>
+
+                <!-- Face Capture Section -->
+                <div class="mt-4 pt-4 border-t border-slate-800 space-y-3">
+                    <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">Face Enrollment Method *</label>
+                    
+                    <div class="grid grid-cols-2 gap-2">
+                        <button type="button" id="tab-webcam" onclick="switchCaptureMode('webcam')" class="p-2.5 rounded-xl border border-emerald-500 bg-emerald-500/10 text-emerald-400 text-xs font-semibold flex items-center justify-center gap-1.5 transition">
+                            <i class="fa-solid fa-camera"></i> Live Webcam
+                        </button>
+                        <button type="button" id="tab-upload" onclick="switchCaptureMode('upload')" class="p-2.5 rounded-xl border border-slate-700 bg-dark-800 text-slate-400 text-xs font-semibold flex items-center justify-center gap-1.5 transition">
+                            <i class="fa-solid fa-upload"></i> Upload Image
+                        </button>
+                    </div>
+
+                    <!-- Webcam Capture Container -->
+                    <div id="webcam-container" class="space-y-2">
+                        <div class="relative bg-black rounded-xl overflow-hidden aspect-video border border-slate-700 flex items-center justify-center min-h-[220px]">
+                            <!-- Browser Video Stream -->
+                            <video id="modal-video" autoplay playsinline muted class="w-full h-full object-cover"></video>
+                            <!-- Backend OpenCV Stream Image Fallback -->
+                            <img id="modal-backend-stream" src="{{ url_for('video_feed') }}" class="w-full h-full object-cover hidden" alt="Live Feed Preview">
+                            <canvas id="modal-canvas" class="hidden"></canvas>
+
+                            <!-- Captured Snapshot Preview Overlay -->
+                            <div id="captured-preview-wrap" class="absolute inset-0 bg-black hidden flex items-center justify-center">
+                                <img id="captured-preview" class="w-full h-full object-cover" alt="Captured Face Preview">
+                            </div>
+                        </div>
+
+                        <div class="flex gap-2">
+                            <button type="button" id="snap-btn" onclick="captureSnapshot()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs py-2 rounded-xl transition flex items-center justify-center gap-1.5">
+                                <i class="fa-solid fa-camera"></i> Snap Photo
+                            </button>
+                            <button type="button" id="burst-btn" onclick="captureBurstSamples(5)" class="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs py-2 rounded-xl transition flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20">
+                                <i class="fa-solid fa-layer-group"></i> Burst 5 Samples
+                            </button>
+                            <button type="button" id="retake-btn" onclick="retakeSnapshot()" class="hidden px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs py-2 rounded-xl transition">
+                                Retake
+                            </button>
+                        </div>
+                        <!-- Samples Preview Thumbnails -->
+                        <div id="samples-strip" class="hidden flex gap-2 pt-2 overflow-x-auto"></div>
+                    </div>
+
+                    <!-- File Upload Container -->
+                    <div id="upload-container" class="hidden space-y-2">
+                        <div class="border-2 border-dashed border-slate-700 hover:border-emerald-500 rounded-xl p-6 text-center cursor-pointer transition bg-dark-800/40" onclick="document.getElementById('face-file-input').click()">
+                            <i class="fa-solid fa-cloud-arrow-up text-3xl text-slate-500 mb-2"></i>
+                            <p class="text-xs font-medium text-slate-300">Click to choose face photo</p>
+                            <p class="text-[10px] text-slate-500 mt-1">PNG, JPG, JPEG supported. Clear front-facing photo.</p>
+                            <input type="file" id="face-file-input" accept="image/*" class="hidden" onchange="handleFileUpload(event)">
+                        </div>
+                        <div id="file-preview-wrap" class="hidden text-center">
+                            <img id="file-preview" class="h-32 w-32 rounded-xl object-cover mx-auto border border-emerald-500">
+                            <p class="text-[11px] text-emerald-400 mt-1" id="file-name-label"></p>
+                        </div>
+                    </div>
+
+                    <input type="hidden" id="face-data-base64">
+                </div>
+
+                <!-- Submit / Cancel -->
+                <div class="mt-6 flex items-center justify-end space-x-2 pt-4 border-t border-slate-800">
+                    <button type="button" onclick="closeEnrollModal()" class="px-4 py-2.5 rounded-xl border border-slate-700 text-slate-400 hover:text-white text-xs transition">
+                        Cancel
+                    </button>
+                    <button type="submit" id="enroll-submit-btn" class="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs shadow-md shadow-emerald-500/20 transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-check"></i> Save & Enroll Biometrics
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let modalStream = null;
+    let currentMode = 'webcam';
+    let capturedBase64 = null;
+    let capturedSamples = [];
+    let usingBackendFallback = false;
+
+    function showModalAlert(msg, type = 'error') {
+        const el = document.getElementById('enroll-modal-alert');
+        el.className = `mb-3 p-3 rounded-xl text-xs flex items-center gap-2 ${
+            type === 'error' ? 'bg-rose-500/10 text-rose-300 border border-rose-500/30' :
+            type === 'success' ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30' :
+            'bg-blue-500/10 text-blue-300 border border-blue-500/30'
+        }`;
+        const icon = type === 'error' ? '<i class="fa-solid fa-circle-exclamation text-rose-400"></i>' :
+                     type === 'success' ? '<i class="fa-solid fa-circle-check text-emerald-400"></i>' :
+                     '<i class="fa-solid fa-circle-info text-blue-400"></i>';
+        el.innerHTML = `${icon}<span>${msg}</span>`;
+        el.classList.remove('hidden');
+    }
+
+    function hideModalAlert() {
+        document.getElementById('enroll-modal-alert').classList.add('hidden');
+    }
+
+    function openEnrollModal() {
+        document.getElementById('enroll-modal').classList.remove('hidden');
+        hideModalAlert();
+        switchCaptureMode('webcam');
+    }
+
+    function closeEnrollModal() {
+        document.getElementById('enroll-modal').classList.add('hidden');
+        stopModalWebcam();
+        document.getElementById('enroll-form').reset();
+        retakeSnapshot();
+        hideModalAlert();
+    }
+
+    function switchCaptureMode(mode) {
+        currentMode = mode;
+        const webcamTab = document.getElementById('tab-webcam');
+        const uploadTab = document.getElementById('tab-upload');
+        const webcamContainer = document.getElementById('webcam-container');
+        const uploadContainer = document.getElementById('upload-container');
+
+        if (mode === 'webcam') {
+            webcamTab.className = "p-2.5 rounded-xl border border-emerald-500 bg-emerald-500/10 text-emerald-400 text-xs font-semibold flex items-center justify-center gap-1.5 transition";
+            uploadTab.className = "p-2.5 rounded-xl border border-slate-700 bg-dark-800 text-slate-400 text-xs font-semibold flex items-center justify-center gap-1.5 transition";
+            webcamContainer.classList.remove('hidden');
+            uploadContainer.classList.add('hidden');
+            startModalWebcam();
+        } else {
+            uploadTab.className = "p-2.5 rounded-xl border border-emerald-500 bg-emerald-500/10 text-emerald-400 text-xs font-semibold flex items-center justify-center gap-1.5 transition";
+            webcamTab.className = "p-2.5 rounded-xl border border-slate-700 bg-dark-800 text-slate-400 text-xs font-semibold flex items-center justify-center gap-1.5 transition";
+            uploadContainer.classList.remove('hidden');
+            webcamContainer.classList.add('hidden');
+            stopModalWebcam();
+        }
+    }
+
+    function startModalWebcam() {
+        const video = document.getElementById('modal-video');
+        const backendImg = document.getElementById('modal-backend-stream');
+
+        // Try browser getUserMedia first
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+                .then(stream => {
+                    modalStream = stream;
+                    video.srcObject = stream;
+                    video.classList.remove('hidden');
+                    backendImg.classList.add('hidden');
+                    usingBackendFallback = false;
+                })
+                .catch(err => {
+                    console.log("Browser camera locked or unavailable, using backend stream fallback:", err);
+                    useBackendCameraStream();
+                });
+        } else {
+            useBackendCameraStream();
+        }
+    }
+
+    function useBackendCameraStream() {
+        usingBackendFallback = true;
+        const video = document.getElementById('modal-video');
+        const backendImg = document.getElementById('modal-backend-stream');
+        video.classList.add('hidden');
+        backendImg.src = "{{ url_for('video_feed') }}?t=" + new Date().getTime();
+        backendImg.classList.remove('hidden');
+    }
+
+    function stopModalWebcam() {
+        if (modalStream) {
+            modalStream.getTracks().forEach(track => track.stop());
+            modalStream = null;
+        }
+    }
+
+    async function getSnapshotFromCamera() {
+        const video = document.getElementById('modal-video');
+        const canvas = document.getElementById('modal-canvas');
+
+        // If browser video is active and has valid dimensions
+        if (!usingBackendFallback && video && video.videoWidth > 0) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            return canvas.toDataURL('image/jpeg', 0.92);
+        }
+
+        // Otherwise fetch high quality frame directly from OpenCV backend
+        try {
+            const res = await fetch('/api/camera_snapshot');
+            const data = await res.json();
+            if (data.status && data.image) {
+                return data.image;
+            } else {
+                throw new Error(data.message || "Camera snapshot failed");
+            }
+        } catch (e) {
+            console.error("Camera snapshot error:", e);
+            return null;
+        }
+    }
+
+    async function captureSnapshot() {
+        hideModalAlert();
+        const snapBtn = document.getElementById('snap-btn');
+        snapBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Snapping...';
+
+        const b64 = await getSnapshotFromCamera();
+        snapBtn.innerHTML = '<i class="fa-solid fa-camera"></i> Snap Photo';
+
+        if (!b64) {
+            showModalAlert("Could not capture from webcam. You can also use the 'Upload Image' tab to upload a photo file.", "error");
+            showToast("Camera capture failed. Try 'Upload Image' tab.", "error");
+            return;
+        }
+
+        capturedBase64 = b64;
+        capturedSamples = [b64];
+        document.getElementById('face-data-base64').value = b64;
+
+        const preview = document.getElementById('captured-preview');
+        preview.src = b64;
+        document.getElementById('captured-preview-wrap').classList.remove('hidden');
+        document.getElementById('snap-btn').classList.add('hidden');
+        document.getElementById('burst-btn').classList.add('hidden');
+        document.getElementById('retake-btn').classList.remove('hidden');
+        showModalAlert("Photo captured! Click 'Save & Enroll Biometrics' below to save.", "success");
+        showToast("Photo captured! Ready to save.", "success");
+    }
+
+    async function captureBurstSamples(totalSamples = 5) {
+        hideModalAlert();
+        const burstBtn = document.getElementById('burst-btn');
+        const snapBtn = document.getElementById('snap-btn');
+        const strip = document.getElementById('samples-strip');
+
+        burstBtn.disabled = true;
+        snapBtn.disabled = true;
+        capturedSamples = [];
+        strip.innerHTML = '';
+        strip.classList.remove('hidden');
+
+        showToast("Capturing 5 samples! Move your head slightly for angle variation...", "info");
+
+        for (let i = 1; i <= totalSamples; i++) {
+            burstBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Sample ${i}/${totalSamples}`;
+            const b64 = await getSnapshotFromCamera();
+            if (b64) {
+                capturedSamples.push(b64);
+                const thumb = document.createElement('img');
+                thumb.src = b64;
+                thumb.className = "h-14 w-14 rounded-lg object-cover border-2 border-emerald-500 shadow";
+                strip.appendChild(thumb);
+            }
+            // Delay between shots
+            await new Promise(r => setTimeout(r, 300));
+        }
+
+        burstBtn.disabled = false;
+        snapBtn.disabled = false;
+        burstBtn.innerHTML = '<i class="fa-solid fa-layer-group"></i> Burst 5 Samples';
+
+        if (capturedSamples.length === 0) {
+            showModalAlert("Burst capture failed. Please use 'Upload Image' tab.", "error");
+            return;
+        }
+
+        capturedBase64 = capturedSamples[0];
+        document.getElementById('face-data-base64').value = capturedBase64;
+        document.getElementById('captured-preview').src = capturedBase64;
+        document.getElementById('captured-preview-wrap').classList.remove('hidden');
+        document.getElementById('snap-btn').classList.add('hidden');
+        document.getElementById('burst-btn').classList.add('hidden');
+        document.getElementById('retake-btn').classList.remove('hidden');
+
+        showModalAlert(`Captured ${capturedSamples.length} samples! Click 'Save & Enroll Biometrics' below to store.`, "success");
+        showToast(`Captured ${capturedSamples.length} samples!`, "success");
+    }
+
+    function retakeSnapshot() {
+        document.getElementById('captured-preview-wrap').classList.add('hidden');
+        document.getElementById('snap-btn').classList.remove('hidden');
+        document.getElementById('burst-btn').classList.remove('hidden');
+        document.getElementById('retake-btn').classList.add('hidden');
+        document.getElementById('samples-strip').classList.add('hidden');
+        document.getElementById('samples-strip').innerHTML = '';
+        document.getElementById('face-data-base64').value = '';
+        capturedBase64 = null;
+        capturedSamples = [];
+        hideModalAlert();
+    }
+
+    function handleFileUpload(event) {
+        hideModalAlert();
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            capturedBase64 = e.target.result;
+            capturedSamples = [capturedBase64];
+            document.getElementById('face-data-base64').value = capturedBase64;
+            document.getElementById('file-preview').src = capturedBase64;
+            document.getElementById('file-name-label').innerText = file.name;
+            document.getElementById('file-preview-wrap').classList.remove('hidden');
+            showModalAlert("Image selected! Click 'Save & Enroll Biometrics' below to save.", "success");
+            showToast("Image selected! Click save to enroll.", "success");
+        };
+        reader.readAsDataURL(file);
+    }
+
+    async function submitEnrollment(e) {
+        e.preventDefault();
+        hideModalAlert();
+
+        const name = document.getElementById('reg-name').value.trim();
+        const roll = document.getElementById('reg-roll').value.trim().toUpperCase();
+        const dept = document.getElementById('reg-dept').value;
+        const email = document.getElementById('reg-email').value.trim();
+
+        if (!name || !roll) {
+            showModalAlert("Please fill in Student Name and Roll Number.", "error");
+            return;
+        }
+
+        // Auto-capture if user didn't explicitly hit snap button
+        if (!capturedSamples || capturedSamples.length === 0) {
+            if (currentMode === 'webcam') {
+                showModalAlert("Automatically snapping camera frame...", "info");
+                const autoSnap = await getSnapshotFromCamera();
+                if (autoSnap) {
+                    capturedSamples = [autoSnap];
+                }
+            }
+        }
+
+        if (!capturedSamples || capturedSamples.length === 0) {
+            showModalAlert("Please snap a face photo or upload an image using the 'Upload Image' tab before saving.", "error");
+            showToast("Please snap or upload a face image first!", "error");
+            return;
+        }
+
+        const submitBtn = document.getElementById('enroll-submit-btn');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing & Saving...';
+
+        const payload = {
+            name: name,
+            roll_number: roll,
+            department: dept,
+            email: email,
+            image: capturedSamples[0],
+            images: capturedSamples
+        };
+
+        try {
+            const response = await fetch('/api/register_student', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await response.json();
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Save & Enroll Biometrics';
+
+            if (data.status) {
+                showModalAlert(data.message, "success");
+                showToast(data.message, "success");
+                setTimeout(() => {
+                    closeEnrollModal();
+                    window.location.reload();
+                }, 800);
+            } else {
+                showModalAlert(data.message || "Failed to enroll student.", "error");
+                showToast(data.message || "Failed to enroll student.", "error");
+            }
+        } catch (err) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Save & Enroll Biometrics';
+            showModalAlert("Error communicating with server: " + err.message, "error");
+            showToast("Error: " + err.message, "error");
+        }
+    }
+
+    function deleteStudent(roll, name) {
+        if (!confirm(`Are you sure you want to delete student: ${name} (${roll})?\nThis will remove their face biometrics and attendance history.`)) {
+            return;
+        }
+
+        fetch(`/api/delete_student/${encodeURIComponent(roll)}`, { method: 'DELETE' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status) {
+                    showToast(data.message, "success");
+                    setTimeout(() => window.location.reload(), 600);
+                } else {
+                    showToast(data.message, "error");
+                }
+            });
+    }
+
+    function filterStudentList() {
+        const query = document.getElementById('student-search-input').value.toLowerCase();
+        const rows = document.querySelectorAll('.student-row');
+        rows.forEach(r => {
+            const data = r.getAttribute('data-search');
+            r.style.display = data.includes(query) ? '' : 'none';
+        });
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login | AI Real-Time Attendance System</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace']
+                    },
+                    colors: {
+                        dark: {
+                            800: '#181b26',
+                            850: '#12151f',
+                            900: '#0b0d14',
+                            950: '#06070a'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-dark-950 text-slate-100 font-sans min-h-screen flex items-center justify-center p-4 selection:bg-emerald-500 selection:text-white">
+
+    <div class="max-w-md w-full">
+        <!-- Logo & Branding -->
+        <div class="text-center mb-8">
+            <div class="inline-flex h-14 w-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 items-center justify-center shadow-xl shadow-emerald-500/20 mb-3">
+                <i class="fa-solid fa-camera-viewfinder text-white text-2xl"></i>
+            </div>
+            <h1 class="text-2xl font-extrabold text-white tracking-tight">VisionAttend</h1>
+            <p class="text-xs text-slate-400 mt-1">AI Real-Time Attendance & Biometrics Portal</p>
+        </div>
+
+        <!-- Login Card -->
+        <div class="bg-dark-900 border border-slate-800 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
+            <!-- Glow background effect -->
+            <div class="absolute -top-24 -right-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+            <div class="mb-6">
+                <h2 class="text-lg font-bold text-white">Administrator Login</h2>
+                <p class="text-xs text-slate-400 mt-0.5">Enter your credentials to access the AI dashboard.</p>
+            </div>
+
+            {% if error %}
+            <div class="mb-4 bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-center gap-2.5 text-xs text-rose-300">
+                <i class="fa-solid fa-circle-exclamation text-rose-400"></i>
+                <span>{{ error }}</span>
+            </div>
+            {% endif %}
+
+            <form method="POST" action="{{ url_for('login') }}" class="space-y-4">
+                <div>
+                    <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">Username</label>
+                    <div class="relative">
+                        <i class="fa-solid fa-user absolute left-3.5 top-3 text-xs text-slate-500"></i>
+                        <input type="text" name="username" required value="admin"
+                               class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">Password</label>
+                    <div class="relative">
+                        <i class="fa-solid fa-lock absolute left-3.5 top-3 text-xs text-slate-500"></i>
+                        <input type="password" name="password" required value="admin123"
+                               class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
+                    </div>
+                </div>
+
+                <div class="pt-2">
+                    <button type="submit" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs py-3 rounded-xl shadow-lg shadow-emerald-500/20 transition flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-right-to-bracket"></i> Sign In to Dashboard
+                    </button>
+                </div>
+            </form>
+
+            <!-- Quick Demo Credential Badge -->
+            <div class="mt-6 pt-5 border-t border-slate-800/80 text-center">
+                <div class="bg-dark-800/60 rounded-xl p-3 border border-slate-800 text-[11px] text-slate-400">
+                    <span class="font-semibold text-slate-300">Default Demo Credentials:</span><br>
+                    Username: <code class="text-emerald-400 font-mono">admin</code> &bull; Password: <code class="text-emerald-400 font-mono">admin123</code>
+                </div>
+            </div>
+        </div>
+
+        <p class="text-center text-xs text-slate-500 mt-6">
+            Protected by OpenCV Deep Neural Network Biometric Guard
+        </p>
+    </div>
+
+</body>
+</html>
