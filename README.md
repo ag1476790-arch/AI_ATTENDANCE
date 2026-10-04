@@ -121,4 +121,7 @@ To run without a web browser directly in a pure OpenCV window:
 python run_desktop.py
 ```
 Press **`q`** or **`ESC`** to exit.
-```Render link(https://ai-attendance-1-jce2.onrender.com/) ```
+```Render link
+(
+https://ai-attendance-1-jce2.onrender.com/
+) ```
