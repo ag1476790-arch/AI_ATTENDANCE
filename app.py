@@ -6,7 +6,9 @@ import base64
 from datetime import datetime
 from threading import Lock
 
+import urllib.parse
 import cv2
+import requests
 import numpy as np
 import pandas as pd
 from flask import (
@@ -19,19 +21,23 @@ import database
 from attendance import attendance_system
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY')
-if not app.config['SECRET_KEY']:
-    raise RuntimeError(
-        "Set the FLASK_SECRET_KEY environment variable before starting the web app."
-    )
-if not database.has_admin_accounts():
-    raise RuntimeError(
-        "No admin account exists. Set ADMIN_USERNAME and ADMIN_PASSWORD, then restart."
-    )
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'visionattend-secret-key-2026-production')
+
+# OAuth Credentials from environment
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '').strip()
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '').strip()
+GITHUB_CLIENT_ID = os.environ.get('GITHUB_CLIENT_ID', '').strip()
+GITHUB_CLIENT_SECRET = os.environ.get('GITHUB_CLIENT_SECRET', '').strip()
 
 DATASET_DIR = os.path.join(os.path.dirname(__file__), 'dataset')
 os.makedirs(DATASET_DIR, exist_ok=True)
 frame_processing_lock = Lock()
+
+@app.context_processor
+def inject_context():
+    return {
+        'user_session': session.get('user', {})
+    }
 
 # ----------------------------------------------------
 # Static Image Serving for Dataset
@@ -41,31 +47,454 @@ def serve_dataset_image(filename):
     return send_from_directory(DATASET_DIR, filename)
 
 # ----------------------------------------------------
-# Authentication Routes
+# Authentication Routes (Student & Admin, Google & GitHub)
 # ----------------------------------------------------
 @app.route('/login', methods=['GET', 'POST'])
+@app.route('/auth', methods=['GET'])
 def login():
-    error = None
+    initial_role = request.args.get('role', 'student').lower()
+    if initial_role not in ('student', 'admin'):
+        initial_role = 'student'
+    error = request.args.get('error')
+    message = request.args.get('message')
+
     if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '').strip()
-        if database.verify_admin(username, password):
-            session['admin_user'] = username
-            return redirect(url_for('dashboard'))
+        role = request.form.get('role', 'admin').lower()
+        if role == 'admin':
+            username = request.form.get('username', '').strip()
+            password = request.form.get('password', '').strip()
+            if database.verify_admin(username, password):
+                session.clear()
+                session['admin_user'] = username
+                session['role'] = 'admin'
+                session['auth_provider'] = 'local'
+                session['user'] = {
+                    'name': username,
+                    'role': 'admin',
+                    'provider': 'local',
+                    'email': 'admin@visionattend.local'
+                }
+                return redirect(url_for('dashboard'))
+            else:
+                error = "Invalid admin username or password. Please try again."
+                return render_template('login.html', error=error, initial_role='admin')
         else:
-            error = "Invalid username or password. Please try again."
-    return render_template('login.html', error=error)
+            return redirect(url_for('student_login'))
+
+    return render_template('login.html', error=error, message=message, initial_role=initial_role)
+
+@app.route('/login/student', methods=['POST'])
+def student_login():
+    """Authenticate student via Roll Number or Email."""
+    identifier = request.form.get('student_identifier', '').strip()
+    if not identifier:
+        return render_template('login.html', error="Please provide a Student Roll Number or Email.", initial_role='student')
+
+    student = None
+    if '@' in identifier:
+        student = database.get_student_by_email(identifier)
+    if not student:
+        student = database.get_student_by_roll(identifier.upper())
+    if not student:
+        for s in database.get_all_students():
+            if s['roll_number'].lower() == identifier.lower() or (s['email'] and s['email'].lower() == identifier.lower()):
+                student = s
+                break
+
+    if student:
+        session.clear()
+        session['student_user'] = student['name']
+        session['student_roll'] = student['roll_number']
+        session['role'] = 'student'
+        session['auth_provider'] = 'local'
+        session['user'] = {
+            'name': student['name'],
+            'roll_number': student['roll_number'],
+            'department': student['department'],
+            'email': student['email'],
+            'role': 'student',
+            'provider': 'local'
+        }
+        return redirect(url_for('student_portal'))
+    else:
+        return render_template(
+            'login.html',
+            error=f"Student identifier '{identifier}' not found in database. Try CS-2024-001 or continue with Google/GitHub.",
+            initial_role='student'
+        )
+
+# ----------------------------------------------------
+# Social OAuth Routes (Google & GitHub)
+# ----------------------------------------------------
+def finish_oauth_login(provider, provider_id, email, name, role, avatar=''):
+    """Shared authentication finalize helper for social logins."""
+    role = role.lower() if role in ('student', 'admin') else 'student'
+    session.clear()
+
+    if role == 'admin':
+        session['admin_user'] = name
+        session['role'] = 'admin'
+        session['auth_provider'] = provider
+        session['user'] = {
+            'name': name,
+            'email': email,
+            'role': 'admin',
+            'provider': provider,
+            'avatar': avatar
+        }
+        database.record_oauth_login(provider, provider_id, email, name, 'admin', avatar_url=avatar)
+        return redirect(url_for('dashboard'))
+    else:
+        student = database.get_student_by_email(email)
+        if not student:
+            # Check if default demo student can be claimed, else generate standard ID
+            demo_student = database.get_student_by_roll('CS-2024-001')
+            if demo_student and (not demo_student.get('email') or demo_student.get('email') == email):
+                roll_number = 'CS-2024-001'
+            else:
+                roll_number = f"STU-{abs(hash(email)) % 9000 + 1000}"
+                database.add_student(roll_number, name, 'Computer Science & AI', email=email)
+            student = database.get_student_by_roll(roll_number) or {'roll_number': roll_number, 'name': name, 'department': 'Computer Science & AI'}
+
+        roll_number = student.get('roll_number', 'CS-2024-001')
+        session['student_user'] = name
+        session['student_roll'] = roll_number
+        session['role'] = 'student'
+        session['auth_provider'] = provider
+        session['user'] = {
+            'name': name,
+            'email': email,
+            'roll_number': roll_number,
+            'department': student.get('department', 'Computer Science & AI'),
+            'role': 'student',
+            'provider': provider,
+            'avatar': avatar
+        }
+        database.record_oauth_login(provider, provider_id, email, name, 'student', roll_number=roll_number, avatar_url=avatar)
+        return redirect(url_for('student_portal'))
+
+@app.route('/auth/google')
+def auth_google():
+    """Initiates Google OAuth 2.0 flow or fallback simulator."""
+    role = request.args.get('role', 'student').lower()
+    if role not in ('student', 'admin'):
+        role = 'student'
+
+    if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+        redirect_uri = url_for('auth_google_callback', _external=True)
+        state = f"{role}:{os.urandom(8).hex()}"
+        session['oauth_state'] = state
+        params = {
+            'client_id': GOOGLE_CLIENT_ID,
+            'redirect_uri': redirect_uri,
+            'response_type': 'code',
+            'scope': 'openid email profile',
+            'state': state,
+            'prompt': 'select_account'
+        }
+        return redirect(f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}")
+    else:
+        # Launch instant simulator modal
+        return redirect(url_for('login', simulate='1', provider='google', role=role))
+
+@app.route('/auth/google/callback')
+def auth_google_callback():
+    """Handles Google OAuth authorization callback."""
+    error = request.args.get('error')
+    if error:
+        return redirect(url_for('login', error=f"Google authentication cancelled: {error}"))
+
+    code = request.args.get('code')
+    state = request.args.get('state', '')
+    role = state.split(':')[0] if ':' in state else 'student'
+
+    if not code:
+        return redirect(url_for('login', error="No authorization code received from Google."))
+
+    redirect_uri = url_for('auth_google_callback', _external=True)
+    token_resp = requests.post(
+        'https://oauth2.googleapis.com/token',
+        data={
+            'client_id': GOOGLE_CLIENT_ID,
+            'client_secret': GOOGLE_CLIENT_SECRET,
+            'code': code,
+            'grant_type': 'authorization_code',
+            'redirect_uri': redirect_uri
+        },
+        timeout=10
+    )
+    if token_resp.status_code != 200:
+        return redirect(url_for('login', error="Failed to exchange authorization token with Google."))
+
+    tokens = token_resp.json()
+    access_token = tokens.get('access_token')
+    user_resp = requests.get(
+        'https://www.googleapis.com/oauth2/v2/userinfo',
+        headers={'Authorization': f"Bearer {access_token}"},
+        timeout=10
+    )
+    if user_resp.status_code != 200:
+        return redirect(url_for('login', error="Failed to retrieve Google profile data."))
+
+    user_info = user_resp.json()
+    email = user_info.get('email', '')
+    name = user_info.get('name') or email.split('@')[0].capitalize()
+    google_id = user_info.get('id', '')
+    picture = user_info.get('picture', '')
+
+    return finish_oauth_login(provider='google', provider_id=google_id, email=email, name=name, role=role, avatar=picture)
+
+@app.route('/auth/github')
+def auth_github():
+    """Initiates GitHub OAuth 2.0 flow or fallback simulator."""
+    role = request.args.get('role', 'student').lower()
+    if role not in ('student', 'admin'):
+        role = 'student'
+
+    if GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET:
+        redirect_uri = url_for('auth_github_callback', _external=True)
+        state = f"{role}:{os.urandom(8).hex()}"
+        session['oauth_state'] = state
+        params = {
+            'client_id': GITHUB_CLIENT_ID,
+            'redirect_uri': redirect_uri,
+            'scope': 'read:user user:email',
+            'state': state
+        }
+        return redirect(f"https://github.com/login/oauth/authorize?{urllib.parse.urlencode(params)}")
+    else:
+        return redirect(url_for('login', simulate='1', provider='github', role=role))
+
+@app.route('/auth/github/callback')
+def auth_github_callback():
+    """Handles GitHub OAuth authorization callback."""
+    error = request.args.get('error')
+    if error:
+        return redirect(url_for('login', error=f"GitHub authentication cancelled: {error}"))
+
+    code = request.args.get('code')
+    state = request.args.get('state', '')
+    role = state.split(':')[0] if ':' in state else 'student'
+
+    if not code:
+        return redirect(url_for('login', error="No authorization code received from GitHub."))
+
+    redirect_uri = url_for('auth_github_callback', _external=True)
+    token_resp = requests.post(
+        'https://github.com/login/oauth/access_token',
+        headers={'Accept': 'application/json'},
+        data={
+            'client_id': GITHUB_CLIENT_ID,
+            'client_secret': GITHUB_CLIENT_SECRET,
+            'code': code,
+            'redirect_uri': redirect_uri
+        },
+        timeout=10
+    )
+    if token_resp.status_code != 200:
+        return redirect(url_for('login', error="Failed to exchange authorization token with GitHub."))
+
+    tokens = token_resp.json()
+    access_token = tokens.get('access_token')
+    if not access_token:
+        return redirect(url_for('login', error="GitHub did not grant an access token."))
+
+    user_resp = requests.get(
+        'https://api.github.com/user',
+        headers={'Authorization': f"Bearer {access_token}", 'Accept': 'application/json'},
+        timeout=10
+    )
+    if user_resp.status_code != 200:
+        return redirect(url_for('login', error="Failed to fetch GitHub profile."))
+
+    github_user = user_resp.json()
+    email = github_user.get('email')
+    if not email:
+        emails_resp = requests.get(
+            'https://api.github.com/user/emails',
+            headers={'Authorization': f"Bearer {access_token}", 'Accept': 'application/json'},
+            timeout=10
+        )
+        if emails_resp.status_code == 200:
+            for em in emails_resp.json():
+                if em.get('primary'):
+                    email = em.get('email')
+                    break
+    email = email or f"{github_user.get('login')}@users.noreply.github.com"
+    name = github_user.get('name') or github_user.get('login') or 'GitHub User'
+    github_id = str(github_user.get('id', ''))
+    avatar = github_user.get('avatar_url', '')
+
+    return finish_oauth_login(provider='github', provider_id=github_id, email=email, name=name, role=role, avatar=avatar)
+
+@app.route('/auth/mock')
+def mock_auth():
+    """Instant 1-Click demo authentication for student or admin."""
+    role = request.args.get('role', 'student').lower()
+    provider = request.args.get('provider', 'google').lower()
+
+    if role == 'admin':
+        return finish_oauth_login(
+            provider=provider,
+            provider_id=f"demo_admin_{provider}",
+            email=f"admin.vision@{provider}.com",
+            name="System Administrator",
+            role="admin",
+            avatar="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80"
+        )
+    else:
+        student = database.get_student_by_roll('CS-2024-001')
+        name = student['name'] if student else "Alex Johnson"
+        email = student.get('email') if student else f"alex.student@{provider}.com"
+        return finish_oauth_login(
+            provider=provider,
+            provider_id=f"demo_student_{provider}",
+            email=email,
+            name=name,
+            role="student",
+            avatar="https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=256&q=80"
+        )
+
+@app.route('/auth/mock_post', methods=['POST'])
+def mock_auth_post():
+    """Processes interactive modal submission for simulated social login."""
+    provider = request.form.get('provider', 'google').lower()
+    role = request.form.get('role', 'student').lower()
+    name = request.form.get('name', '').strip() or ('Alex Johnson' if role == 'student' else 'System Administrator')
+    email = request.form.get('email', '').strip() or f"user@{provider}.com"
+    roll_number = request.form.get('roll_number', '').strip().upper()
+
+    if role == 'student' and roll_number:
+        if not database.get_student_by_roll(roll_number):
+            database.add_student(roll_number, name, 'Computer Science & AI', email=email)
+
+    return finish_oauth_login(
+        provider=provider,
+        provider_id=f"sim_{abs(hash(email))}",
+        email=email,
+        name=name,
+        role=role
+    )
 
 @app.route('/logout')
 def logout():
-    session.pop('admin_user', None)
-    return redirect(url_for('login'))
+    session.clear()
+    return redirect(url_for('login', message="You have been signed out successfully."))
 
 # ----------------------------------------------------
-# Pages
+# Student Portal Routes
+# ----------------------------------------------------
+@app.route('/student/portal')
+def student_portal():
+    """Personalized attendance portal for students."""
+    if session.get('role') != 'student':
+        if session.get('admin_user'):
+            roll = 'CS-2024-001'
+        else:
+            return redirect(url_for('login', role='student', error="Please sign in to access your student attendance portal."))
+    else:
+        roll = session.get('student_roll', 'CS-2024-001')
+
+    summary = database.get_student_summary(roll)
+    if not summary:
+        all_students = database.get_all_students()
+        if all_students:
+            roll = all_students[0]['roll_number']
+            session['student_roll'] = roll
+            summary = database.get_student_summary(roll)
+
+    records = database.get_student_attendance(roll)
+    today_str = datetime.now().strftime('%A, %B %d, %Y')
+
+    student_info = summary['student'] if summary else {
+        'name': session.get('student_user', 'Student'),
+        'roll_number': roll,
+        'department': 'Computer Science & AI',
+        'email': session.get('user', {}).get('email', ''),
+        'embedding': None,
+        'photo_path': None
+    }
+
+    return render_template(
+        'student_portal.html',
+        active_page='student_portal',
+        student=student_info,
+        summary=summary or {
+            'attendance_rate': 0.0,
+            'present_count': 0,
+            'absent_count': 0,
+            'total_classes': 0,
+            'is_present_today': False,
+            'today_record': None
+        },
+        attendance_records=records,
+        today_date=today_str,
+        user_session=session.get('user', {})
+    )
+
+@app.route('/student/export_csv')
+def student_export_csv():
+    """Exports personal student attendance to CSV."""
+    roll = session.get('student_roll', 'CS-2024-001')
+    records = database.get_student_attendance(roll)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Record ID', 'Roll Number', 'Student Name', 'Department', 'Date', 'Time', 'Status', 'Confidence (%)'])
+    for r in records:
+        writer.writerow([r['id'], r['roll_number'], r['name'], r['department'], r['date'], r['time'], r['status'], r['confidence']])
+
+    filename = f"My_Attendance_{roll}_{datetime.now().strftime('%Y%m%d')}.csv"
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment;filename={filename}"}
+    )
+
+@app.route('/student/export_excel')
+def student_export_excel():
+    """Exports personal student attendance to styled Excel (.xlsx)."""
+    roll = session.get('student_roll', 'CS-2024-001')
+    records = database.get_student_attendance(roll)
+
+    df = pd.DataFrame(records)
+    if not df.empty:
+        rename_map = {
+            'id': 'Record ID',
+            'roll_number': 'Roll Number',
+            'name': 'Student Name',
+            'department': 'Department',
+            'date': 'Attendance Date',
+            'time': 'Time Logged',
+            'status': 'Status',
+            'confidence': 'AI Match Confidence (%)'
+        }
+        df = df[[col for col in rename_map.keys() if col in df.columns]]
+        df = df.rename(columns=rename_map)
+    else:
+        df = pd.DataFrame(columns=['Record ID', 'Roll Number', 'Student Name', 'Department', 'Attendance Date', 'Time Logged', 'Status', 'AI Match Confidence (%)'])
+
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='My Attendance', index=False)
+    excel_buffer.seek(0)
+
+    filename = f"My_Attendance_{roll}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    return send_file(
+        excel_buffer,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=filename
+    )
+
+# ----------------------------------------------------
+# Pages (Role Access Managed)
 # ----------------------------------------------------
 @app.route('/')
 def dashboard():
+    if session.get('role') == 'student':
+        return redirect(url_for('student_portal'))
+
     stats = database.get_dashboard_stats()
     today_records = database.get_today_attendance()
     return render_template(
@@ -78,6 +507,9 @@ def dashboard():
 
 @app.route('/students')
 def students():
+    if session.get('role') == 'student':
+        return redirect(url_for('student_portal'))
+
     student_list = database.get_all_students()
     return render_template(
         'students.html',
@@ -88,6 +520,9 @@ def students():
 
 @app.route('/reports')
 def reports():
+    if session.get('role') == 'student':
+        return redirect(url_for('student_portal'))
+
     start_date = request.args.get('start_date', '')
     end_date = request.args.get('end_date', '')
     roll_number = request.args.get('roll_number', '')

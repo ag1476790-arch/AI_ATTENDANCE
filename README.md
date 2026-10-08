@@ -11,9 +11,9 @@ An end-to-end Computer Vision attendance management system powered by **OpenCV D
 - **Automated Attendance Logging**: Automatically logs student name, roll number, department, time, and confidence score.
 - **Strict Duplicate Prevention**: Unique constraint guarantees a student cannot be logged multiple times on the same date.
 - **Modern Web Dashboard**: Glassmorphic dark UI with live streaming MJPEG feed, KPI statistics, and real-time attendance polling.
-- **Student Enrollment Hub**: Add students via live webcam snapshot directly in the browser or via image upload.
-- **Auditing & Analytics**: Date-range filtering, department filtering, per-student attendance percentage calculation, and CSV report export.
-- **Dual Runtime Modes**: Run either as a full web application (`app.py`) or as a native desktop window (`run_desktop.py`).
+- **Multi-Role Authentication Portal**: Dual-role sign-in for **Students** (personal attendance records, stats & export) and **Administrators** (camera engine, roster management & auditing).
+- **Google & GitHub Social Logins**: Full OAuth 2.0 integration with Google and GitHub accounts, plus instant 1-click simulation for local testing.
+- **Student Attendance Portal**: Dedicated dashboard for students to check their daily attendance, overall percentage, and export personal attendance reports.
 
 ---
 
@@ -70,6 +70,8 @@ AI_Attendance/
 │
 ├── templates/                  # Frontend HTML templates
 │   ├── base.html               # Base navigation and theme
+│   ├── login.html              # Student / Admin auth with Google & GitHub logins
+│   ├── student_portal.html     # Student portal for personal attendance & export
 │   ├── dashboard.html          # Live feed, KPI cards, real-time table
 │   ├── students.html           # Enrollment modal & student directory
 │   ├── reports.html            # Attendance logs, student % & CSV export
