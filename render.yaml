@@ -3,15 +3,18 @@ services:
     name: ai-attendance
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
     healthCheckPath: /login
+    autoDeploy: false
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.6
+      - key: FLASK_ENV
+        value: production
       - key: FLASK_SECRET_KEY
         generateValue: true
       - key: ADMIN_USERNAME
-        sync: false
+        value: admin
       - key: ADMIN_PASSWORD
-        sync: false
+        generateValue: true

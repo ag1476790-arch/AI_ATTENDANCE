@@ -3,10 +3,11 @@ import io
 import re
 import csv
 import base64
+import functools
+import urllib.parse
 from datetime import datetime
 from threading import Lock
 
-import urllib.parse
 import cv2
 import requests
 import numpy as np
@@ -22,6 +23,9 @@ from attendance import attendance_system
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'visionattend-secret-key-2026-production')
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
 
 # OAuth Credentials from environment
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '').strip()
@@ -29,14 +33,42 @@ GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '').strip()
 GITHUB_CLIENT_ID = os.environ.get('GITHUB_CLIENT_ID', '').strip()
 GITHUB_CLIENT_SECRET = os.environ.get('GITHUB_CLIENT_SECRET', '').strip()
 
+# Firebase Authentication configuration
+FIREBASE_PROJECT_ID = os.environ.get('FIREBASE_PROJECT_ID', 'ai-attendance-14ab6').strip()
+FIREBASE_AUTH_DOMAIN = os.environ.get('FIREBASE_AUTH_DOMAIN', 'ai-attendance-14ab6.firebaseapp.com').strip()
+FIREBASE_API_KEY = os.environ.get('FIREBASE_API_KEY', '').strip()
+
 DATASET_DIR = os.path.join(os.path.dirname(__file__), 'dataset')
 os.makedirs(DATASET_DIR, exist_ok=True)
 frame_processing_lock = Lock()
 
+def is_admin():
+    """Returns True if current session holds administrator privileges."""
+    return session.get('role') == 'admin' or bool(session.get('admin_user'))
+
+def admin_required(f):
+    """Restricts route access strictly to authenticated Administrators."""
+    @functools.wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not is_admin():
+            if request.path.startswith('/api/'):
+                return jsonify({
+                    'status': False,
+                    'message': 'Access Denied: Only administrators are authorized to create, update, or delete student records.'
+                }), 403
+            return redirect(url_for('login', role='admin', error="Administrator credentials required to perform this action."))
+        return f(*args, **kwargs)
+    return decorated_function
+
 @app.context_processor
 def inject_context():
     return {
-        'user_session': session.get('user', {})
+        'user_session': session.get('user', {}),
+        'is_admin': is_admin(),
+        'current_role': session.get('role', 'admin' if session.get('admin_user') else None),
+        'firebase_project_id': FIREBASE_PROJECT_ID,
+        'firebase_auth_domain': FIREBASE_AUTH_DOMAIN,
+        'firebase_api_key': FIREBASE_API_KEY,
     }
 
 # ----------------------------------------------------
@@ -52,6 +84,9 @@ def serve_dataset_image(filename):
 @app.route('/login', methods=['GET', 'POST'])
 @app.route('/auth', methods=['GET'])
 def login():
+    initial_mode = request.args.get('mode', 'login').lower()
+    if initial_mode not in ('login', 'register'):
+        initial_mode = 'login'
     initial_role = request.args.get('role', 'student').lower()
     if initial_role not in ('student', 'admin'):
         initial_role = 'student'
@@ -59,49 +94,95 @@ def login():
     message = request.args.get('message')
 
     if request.method == 'POST':
-        role = request.form.get('role', 'admin').lower()
+        is_json = request.is_json
+        payload = request.get_json(silent=True) if is_json else request.form
+        if not payload:
+            payload = {}
+
+        role = payload.get('role', 'student').strip().lower()
+        if role not in ('student', 'admin'):
+            role = 'student'
+
         if role == 'admin':
-            username = request.form.get('username', '').strip()
-            password = request.form.get('password', '').strip()
-            if database.verify_admin(username, password):
+            identifier = payload.get('username') or payload.get('identifier') or payload.get('email', '')
+            identifier = identifier.strip()
+            password = payload.get('password', '').strip()
+            if not identifier or not password:
+                err = "Admin username/email and password are required."
+                if is_json:
+                    return jsonify({'status': False, 'message': err}), 400
+                return render_template('login.html', error=err, initial_role='admin', initial_mode='login')
+
+            if database.verify_admin(identifier, password):
+                admin = database.get_admin_by_identifier(identifier)
+                admin_name = admin['username'] if admin else identifier
                 session.clear()
-                session['admin_user'] = username
+                session['admin_user'] = admin_name
                 session['role'] = 'admin'
                 session['auth_provider'] = 'local'
                 session['user'] = {
-                    'name': username,
+                    'name': admin_name,
                     'role': 'admin',
                     'provider': 'local',
-                    'email': 'admin@visionattend.local'
+                    'email': admin.get('email') if admin else f"{admin_name}@visionattend.local"
                 }
+                if is_json:
+                    return jsonify({'status': True, 'redirect': url_for('dashboard')})
                 return redirect(url_for('dashboard'))
             else:
-                error = "Invalid admin username or password. Please try again."
-                return render_template('login.html', error=error, initial_role='admin')
-        else:
-            return redirect(url_for('student_login'))
+                err = "Invalid admin username or password. Please try again."
+                if is_json:
+                    return jsonify({'status': False, 'message': err}), 401
+                return render_template('login.html', error=err, initial_role='admin', initial_mode='login')
 
-    return render_template('login.html', error=error, message=message, initial_role=initial_role)
+        else:  # Student Login
+            identifier = payload.get('student_identifier') or payload.get('identifier') or payload.get('roll_number') or payload.get('email', '')
+            identifier = identifier.strip()
+            password = payload.get('password', '').strip()
+            if not identifier:
+                err = "Please enter your Student Roll Number or Email."
+                if is_json:
+                    return jsonify({'status': False, 'message': err}), 400
+                return render_template('login.html', error=err, initial_role='student', initial_mode='login')
+
+            success, res = database.verify_student(identifier, password)
+            if success:
+                student = res
+                session.clear()
+                session['student_user'] = student['name']
+                session['student_roll'] = student['roll_number']
+                session['role'] = 'student'
+                session['auth_provider'] = 'local'
+                session['user'] = {
+                    'name': student['name'],
+                    'roll_number': student['roll_number'],
+                    'department': student['department'],
+                    'email': student['email'],
+                    'role': 'student',
+                    'provider': 'local'
+                }
+                if is_json:
+                    return jsonify({'status': True, 'redirect': url_for('student_portal')})
+                return redirect(url_for('student_portal'))
+            else:
+                err = res if isinstance(res, str) else "Invalid student credentials."
+                if is_json:
+                    return jsonify({'status': False, 'message': err}), 401
+                return render_template('login.html', error=err, initial_role='student', initial_mode='login')
+
+    return render_template('login.html', error=error, message=message, initial_role=initial_role, initial_mode=initial_mode)
 
 @app.route('/login/student', methods=['POST'])
 def student_login():
-    """Authenticate student via Roll Number or Email."""
+    """Authenticate student via Roll Number or Email (Form submission compatibility)."""
     identifier = request.form.get('student_identifier', '').strip()
+    password = request.form.get('password', '').strip()
     if not identifier:
-        return render_template('login.html', error="Please provide a Student Roll Number or Email.", initial_role='student')
+        return render_template('login.html', error="Please provide a Student Roll Number or Email.", initial_role='student', initial_mode='login')
 
-    student = None
-    if '@' in identifier:
-        student = database.get_student_by_email(identifier)
-    if not student:
-        student = database.get_student_by_roll(identifier.upper())
-    if not student:
-        for s in database.get_all_students():
-            if s['roll_number'].lower() == identifier.lower() or (s['email'] and s['email'].lower() == identifier.lower()):
-                student = s
-                break
-
-    if student:
+    success, res = database.verify_student(identifier, password)
+    if success:
+        student = res
         session.clear()
         session['student_user'] = student['name']
         session['student_roll'] = student['roll_number']
@@ -117,11 +198,244 @@ def student_login():
         }
         return redirect(url_for('student_portal'))
     else:
-        return render_template(
-            'login.html',
-            error=f"Student identifier '{identifier}' not found in database. Try CS-2024-001 or continue with Google/GitHub.",
-            initial_role='student'
+        err = res if isinstance(res, str) else f"Student '{identifier}' not found in the database. Please register first."
+        return render_template('login.html', error=err, initial_role='student', initial_mode='login')
+
+@app.route('/register', methods=['POST'])
+def register():
+    """
+    Handles registration for both Admin and Student accounts.
+    Strictly displays 'Account already registered' if an account with the same
+    Roll Number, Username, or Email already exists.
+    """
+    is_json = request.is_json
+    payload = request.get_json(silent=True) if is_json else request.form
+    if not payload:
+        payload = {}
+
+    role = payload.get('role', 'student').strip().lower()
+    if role not in ('student', 'admin'):
+        role = 'student'
+
+    if role == 'admin':
+        username = payload.get('username', '').strip()
+        email = payload.get('email', '').strip()
+        password = payload.get('password', '').strip()
+        firebase_uid = payload.get('firebase_uid', '').strip()
+
+        if not username or not password:
+            err = "Admin username and password are required."
+            if is_json:
+                return jsonify({'status': False, 'message': err}), 400
+            return render_template('login.html', error=err, initial_role='admin', initial_mode='register')
+
+        success, msg = database.register_admin(username, password, email=email, firebase_uid=firebase_uid)
+        if success:
+            session.clear()
+            session['admin_user'] = username
+            session['role'] = 'admin'
+            session['auth_provider'] = 'firebase' if firebase_uid else 'local'
+            session['user'] = {
+                'name': username,
+                'role': 'admin',
+                'provider': 'firebase' if firebase_uid else 'local',
+                'email': email or f"{username}@visionattend.local"
+            }
+            if is_json:
+                return jsonify({'status': True, 'redirect': url_for('dashboard')})
+            return redirect(url_for('dashboard'))
+        else:
+            if is_json:
+                return jsonify({'status': False, 'message': msg}), 400
+            return render_template('login.html', error=msg, initial_role='admin', initial_mode='register')
+
+    else:  # Student registration
+        name = payload.get('name', '').strip()
+        roll = payload.get('roll_number', '').strip().upper()
+        department = payload.get('department', '').strip()
+        email = payload.get('email', '').strip()
+        password = payload.get('password', '').strip()
+        firebase_uid = payload.get('firebase_uid', '').strip()
+
+        if not name or not roll or not department:
+            err = "Name, Roll Number, and Department are required."
+            if is_json:
+                return jsonify({'status': False, 'message': err}), 400
+            return render_template('login.html', error=err, initial_role='student', initial_mode='register')
+
+        success, msg = database.register_student_user(
+            name=name,
+            roll_number=roll,
+            department=department,
+            email=email,
+            password=password,
+            firebase_uid=firebase_uid
         )
+        if success:
+            session.clear()
+            session['student_user'] = name
+            session['student_roll'] = roll
+            session['role'] = 'student'
+            session['auth_provider'] = 'firebase' if firebase_uid else 'local'
+            session['user'] = {
+                'name': name,
+                'roll_number': roll,
+                'department': department,
+                'email': email,
+                'role': 'student',
+                'provider': 'firebase' if firebase_uid else 'local'
+            }
+            if is_json:
+                return jsonify({'status': True, 'redirect': url_for('student_portal')})
+            return redirect(url_for('student_portal'))
+        else:
+            if is_json:
+                return jsonify({'status': False, 'message': msg}), 400
+            return render_template('login.html', error=msg, initial_role='student', initial_mode='register')
+
+@app.route('/api/firebase_auth', methods=['POST'])
+def api_firebase_auth():
+    """
+    JSON API for Firebase Authentication (Google popup or Firebase Email/Password).
+    Synchronizes authenticated user identity with the local database.
+    Strictly checks duplicate registration returning 'Account already registered'.
+    """
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
+        return jsonify({'status': False, 'message': 'Invalid JSON request payload.'}), 400
+
+    action = data.get('action', 'login').strip().lower()
+    role = data.get('role', 'student').strip().lower()
+    if role not in ('student', 'admin'):
+        role = 'student'
+
+    uid = data.get('uid', '').strip()
+    email = data.get('email', '').strip()
+    name = data.get('name', '').strip()
+    roll_number = data.get('roll_number', '').strip().upper()
+    department = data.get('department', '').strip()
+    password = data.get('password', '').strip()
+
+    if not uid and not email:
+        return jsonify({'status': False, 'message': 'Firebase UID or email is required.'}), 400
+
+    if action == 'register':
+        if role == 'admin':
+            existing = database.get_admin_by_uid(uid) if uid else None
+            if not existing and email:
+                existing = database.get_admin_by_identifier(email)
+            if existing:
+                return jsonify({'status': False, 'message': 'Account already registered'}), 400
+
+            admin_user = name or (email.split('@')[0] if email else 'admin_user')
+            success, msg = database.register_admin(admin_user, password or 'firebase_authenticated', email=email, firebase_uid=uid)
+            if not success:
+                return jsonify({'status': False, 'message': msg}), 400
+
+            session.clear()
+            session['admin_user'] = admin_user
+            session['role'] = 'admin'
+            session['auth_provider'] = 'firebase'
+            session['user'] = {
+                'name': admin_user,
+                'email': email,
+                'role': 'admin',
+                'provider': 'firebase',
+                'uid': uid
+            }
+            return jsonify({'status': True, 'redirect': url_for('dashboard')})
+
+        else:  # Student Registration
+            clean_roll = roll_number.strip().upper() if roll_number else ''
+            clean_email = email.strip() if email else ''
+
+            if clean_roll and database.get_student_by_roll(clean_roll):
+                return jsonify({'status': False, 'message': 'Account already registered'}), 400
+            if clean_email and database.get_student_by_email(clean_email):
+                return jsonify({'status': False, 'message': 'Account already registered'}), 400
+            if uid and database.get_student_by_uid(uid):
+                return jsonify({'status': False, 'message': 'Account already registered'}), 400
+
+            assigned_roll = clean_roll or f"STU-{abs(hash(clean_email or uid)) % 9000 + 1000}"
+            dept = department or 'AI & Data Science'
+            stu_name = name or (clean_email.split('@')[0].capitalize() if clean_email else 'Student')
+
+            success, msg = database.register_student_user(
+                name=stu_name,
+                roll_number=assigned_roll,
+                department=dept,
+                email=clean_email,
+                password=password,
+                firebase_uid=uid
+            )
+            if not success:
+                return jsonify({'status': False, 'message': msg}), 400
+
+            session.clear()
+            session['student_user'] = stu_name
+            session['student_roll'] = assigned_roll
+            session['role'] = 'student'
+            session['auth_provider'] = 'firebase'
+            session['user'] = {
+                'name': stu_name,
+                'roll_number': assigned_roll,
+                'department': dept,
+                'email': clean_email,
+                'role': 'student',
+                'provider': 'firebase',
+                'uid': uid
+            }
+            return jsonify({'status': True, 'redirect': url_for('student_portal')})
+
+    else:  # action == 'login'
+        if role == 'admin':
+            admin = database.get_admin_by_uid(uid) if uid else None
+            if not admin and email:
+                admin = database.get_admin_by_identifier(email)
+            if admin:
+                if not admin.get('firebase_uid') and uid:
+                    database.link_admin_firebase(admin['username'], uid)
+                session.clear()
+                session['admin_user'] = admin['username']
+                session['role'] = 'admin'
+                session['auth_provider'] = 'firebase'
+                session['user'] = {
+                    'name': admin['username'],
+                    'role': 'admin',
+                    'email': admin.get('email', email),
+                    'provider': 'firebase',
+                    'uid': uid
+                }
+                return jsonify({'status': True, 'redirect': url_for('dashboard')})
+            else:
+                return jsonify({'status': False, 'message': 'Admin account not found. Please register first.'}), 404
+
+        else:  # student login
+            student = database.get_student_by_uid(uid) if uid else None
+            if not student and email:
+                student = database.get_student_by_email(email)
+            if not student and roll_number:
+                student = database.get_student_by_roll(roll_number)
+            if student:
+                if not student.get('firebase_uid') and uid:
+                    database.link_student_firebase(student['roll_number'], uid)
+                session.clear()
+                session['student_user'] = student['name']
+                session['student_roll'] = student['roll_number']
+                session['role'] = 'student'
+                session['auth_provider'] = 'firebase'
+                session['user'] = {
+                    'name': student['name'],
+                    'roll_number': student['roll_number'],
+                    'department': student['department'],
+                    'email': student.get('email', email),
+                    'role': 'student',
+                    'provider': 'firebase',
+                    'uid': uid
+                }
+                return jsonify({'status': True, 'redirect': url_for('student_portal')})
+            else:
+                return jsonify({'status': False, 'message': 'Student account not found in database. Please register first.'}), 404
 
 # ----------------------------------------------------
 # Social OAuth Routes (Google & GitHub)
@@ -613,6 +927,7 @@ def api_process_frame():
     return jsonify({'status': True, 'fps': attendance_system.fps})
 
 @app.route('/api/register_student', methods=['POST'])
+@admin_required
 def api_register_student():
     """
     Registers a student and extracts their 128-D facial vector embedding.
@@ -744,14 +1059,21 @@ def api_register_student():
         return jsonify({'status': False, 'message': f'Registration error: {str(e)}'}), 500
 
 @app.route('/api/delete_student/<roll_number>', methods=['DELETE'])
+@admin_required
 def api_delete_student(roll_number):
+    """
+    Permanently deletes a student record. Strictly restricted to Administrators.
+    """
     try:
         roll = roll_number.strip().upper()
         deleted = database.delete_student(roll)
         if deleted:
             photo_path = os.path.join(DATASET_DIR, f"{roll}.jpg")
             if os.path.exists(photo_path):
-                os.remove(photo_path)
+                try:
+                    os.remove(photo_path)
+                except Exception:
+                    pass
             
             attendance_system.reload_enrolled_students()
             return jsonify({'status': True, 'message': f'Student {roll} deleted successfully.'})
@@ -759,6 +1081,77 @@ def api_delete_student(roll_number):
             return jsonify({'status': False, 'message': f'Student {roll} not found.'}), 404
     except Exception as e:
         return jsonify({'status': False, 'message': str(e)}), 500
+
+@app.route('/api/update_student/<roll_number>', methods=['PUT', 'POST'])
+@admin_required
+def api_update_student(roll_number):
+    """
+    Updates student information. Strictly restricted to Administrators.
+    Accepts JSON payload: name, roll_number (new), department, email, optional image.
+    """
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'status': False, 'message': 'Invalid JSON request payload.'}), 400
+
+        orig_roll = roll_number.strip().upper()
+        name = data.get('name', '').strip()
+        new_roll = data.get('roll_number', '').strip().upper() or orig_roll
+        department = data.get('department', '').strip()
+        email = data.get('email', '').strip()
+        image_data = data.get('image', '')
+
+        if not name or not new_roll or not department:
+            return jsonify({'status': False, 'message': 'Name, Roll Number, and Department are required.'}), 400
+
+        new_embedding = None
+        photo_path = None
+
+        if image_data:
+            if ',' in image_data:
+                image_data = image_data.split(',', 1)[1]
+            raw_dec = cv2.imdecode(np.frombuffer(base64.b64decode(image_data), np.uint8), cv2.IMREAD_COLOR)
+            if raw_dec is not None:
+                engine = attendance_system.face_engine
+                faces = engine.detect_faces(raw_dec)
+                if faces:
+                    target_face = max(faces, key=lambda f: f['bbox'][2] * f['bbox'][3])
+                    emb = engine.extract_feature(raw_dec, target_face['raw_face'])
+                    if emb is not None:
+                        new_embedding = emb.astype(np.float32).tobytes()
+                        photo_filename = f"{new_roll}.jpg"
+                        photo_path = os.path.join(DATASET_DIR, photo_filename)
+                        cv2.imwrite(photo_path, raw_dec)
+
+        # If roll number changed without new photo, rename existing dataset photo if present
+        if new_roll != orig_roll and not photo_path:
+            old_photo = os.path.join(DATASET_DIR, f"{orig_roll}.jpg")
+            new_photo = os.path.join(DATASET_DIR, f"{new_roll}.jpg")
+            if os.path.exists(old_photo):
+                try:
+                    os.replace(old_photo, new_photo)
+                    photo_path = new_photo
+                except Exception:
+                    pass
+
+        success, msg = database.update_student(
+            original_roll=orig_roll,
+            name=name,
+            new_roll=new_roll,
+            department=department,
+            email=email,
+            embedding=new_embedding,
+            photo_path=photo_path
+        )
+
+        if success:
+            attendance_system.reload_enrolled_students()
+            return jsonify({'status': True, 'message': msg})
+        else:
+            return jsonify({'status': False, 'message': msg}), 400
+
+    except Exception as e:
+        return jsonify({'status': False, 'message': f'Update error: {str(e)}'}), 500
 
 @app.route('/export_csv')
 def export_csv():
@@ -837,9 +1230,10 @@ def export_excel():
     )
 
 if __name__ == '__main__':
+    port = int(os.environ.get('PORT', '5000'))
     print("=" * 65)
     print(" VisionAttend - AI Real-Time Facial Attendance System")
-    print(" Dashboard active on: http://127.0.0.1:5000")
+    print(f" Dashboard active on: http://0.0.0.0:{port}")
     print(" Set ADMIN_USERNAME and ADMIN_PASSWORD before first launch.")
     print("=" * 65)
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

@@ -11,6 +11,11 @@
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    <!-- Firebase Compat SDK v10 (for direct script inclusion without bundler) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+
     <script>
         tailwind.config = {
             theme: {
@@ -37,9 +42,20 @@
             background: rgba(16, 185, 129, 0.08);
             box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.25);
         }
-        .role-radio:checked + label .check-indicator {
+        .role-radio-student:checked + label {
+            border-color: #14b8a6;
+            background: rgba(20, 184, 166, 0.08);
+            box-shadow: 0 0 25px -5px rgba(20, 184, 166, 0.25);
+        }
+        .role-radio:checked + label .check-indicator,
+        .role-radio-student:checked + label .check-indicator {
             opacity: 1;
             transform: scale(1);
+        }
+        .glass-card {
+            background: rgba(11, 13, 20, 0.88);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
         }
     </style>
 </head>
@@ -50,346 +66,547 @@
     <div class="fixed bottom-1/4 -right-32 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
     <div class="max-w-lg w-full relative z-10 my-8">
-        <!-- Logo & Branding -->
+        
+        <!-- Logo & Branding Header -->
         <div class="text-center mb-6">
-            <div class="inline-flex h-14 w-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 items-center justify-center shadow-xl shadow-emerald-500/20 mb-3 transform hover:scale-105 transition-transform">
+            <div class="inline-flex h-14 w-14 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-500 to-cyan-400 items-center justify-center shadow-xl shadow-emerald-500/20 mb-3 transform hover:scale-105 transition-transform">
                 <i class="fa-solid fa-camera-viewfinder text-white text-2xl"></i>
             </div>
             <h1 class="text-3xl font-extrabold text-white tracking-tight flex items-center justify-center gap-2">
                 VisionAttend
-                <span class="text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 align-middle">v2.0</span>
+                <span class="text-[10px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 align-middle">v2.0</span>
             </h1>
-            <p class="text-xs text-slate-400 mt-1">AI Real-Time Attendance & Biometrics Portal</p>
+            <p class="text-xs text-slate-400 mt-1">AI Facial Recognition Attendance & Identity Hub</p>
+            
+            <!-- Firebase Project Badge -->
+            <div class="inline-flex items-center gap-2 mt-2 px-3 py-1 rounded-full bg-dark-900 border border-slate-800 text-[11px] text-slate-400">
+                <i class="fa-solid fa-fire text-amber-500"></i>
+                <span>Firebase Auth Project: <strong class="text-slate-200 font-mono">{{ firebase_project_id }}</strong></span>
+            </div>
         </div>
 
-        <!-- Authentication Card -->
-        <div class="bg-dark-900/90 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
+        <!-- Authentication Main Card -->
+        <div class="glass-card border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
             
-            <!-- Alert Messages -->
-            {% if error %}
-            <div class="mb-5 bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3.5 flex items-center gap-3 text-xs text-rose-300 animate-pulse">
-                <i class="fa-solid fa-circle-exclamation text-rose-400 text-base flex-shrink-0"></i>
-                <span class="flex-1">{{ error }}</span>
+            <!-- Global Feedback Alerts -->
+            <div id="dynamic-error-box" class="{% if not error %}hidden{% endif %} mb-5 bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex items-start gap-3 text-xs text-rose-300">
+                <i class="fa-solid fa-circle-exclamation text-rose-400 text-lg flex-shrink-0 mt-0.5"></i>
+                <div class="flex-1">
+                    <span id="dynamic-error-text" class="font-semibold block text-rose-200">{{ error or '' }}</span>
+                    <span id="dynamic-error-sub" class="text-[11px] text-rose-400/80 mt-0.5 block">
+                        {% if error and 'already registered' in error|lower %}
+                        Please switch to the Sign In tab to access your account.
+                        {% endif %}
+                    </span>
+                </div>
+                <button type="button" onclick="dismissError()" class="text-rose-400 hover:text-white transition">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
             </div>
-            {% endif %}
 
             {% if message %}
-            <div class="mb-5 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3.5 flex items-center gap-3 text-xs text-emerald-300">
+            <div class="mb-5 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 flex items-center gap-3 text-xs text-emerald-300">
                 <i class="fa-solid fa-circle-check text-emerald-400 text-base flex-shrink-0"></i>
                 <span class="flex-1">{{ message }}</span>
             </div>
             {% endif %}
 
-            <!-- SECTION 1: ROLE CHOICE (STUDENT OR ADMIN) -->
+            <!-- ========================================== -->
+            <!-- STEP 1: AUTHENTICATION MODE (LOGIN / REGISTER) -->
+            <!-- ========================================== -->
+            <div class="mb-5">
+                <div class="flex items-center justify-between mb-2">
+                    <label class="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        1. Select Action
+                    </label>
+                    <span id="mode-helper-text" class="text-[11px] text-slate-400 font-medium">Already registered? Log in directly</span>
+                </div>
+
+                <div class="grid grid-cols-2 p-1.5 bg-dark-850 rounded-2xl border border-slate-800">
+                    <button type="button" id="tab-btn-login" onclick="switchAuthMode('login')"
+                            class="py-2.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 bg-emerald-500 text-white shadow-lg shadow-emerald-500/20">
+                        <i class="fa-solid fa-right-to-bracket text-xs"></i>
+                        <span>Login</span>
+                    </button>
+                    <button type="button" id="tab-btn-register" onclick="switchAuthMode('register')"
+                            class="py-2.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 text-slate-400 hover:text-white">
+                        <i class="fa-solid fa-user-plus text-xs"></i>
+                        <span>Register</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- ========================================== -->
+            <!-- STEP 2: ROLE SELECTION (ADMIN / STUDENT) -->
+            <!-- ========================================== -->
             <div class="mb-6">
-                <label class="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2.5">
-                    Step 1: Choose Your Account Role
+                <label class="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                    2. Select Role
                 </label>
 
                 <div class="grid grid-cols-2 gap-3">
-                    <!-- Choice 1: Student -->
+                    <!-- Choice A: Student -->
                     <div>
-                        <input type="radio" name="role_choice" id="role_student" value="student" class="role-radio hidden" {% if initial_role != 'admin' %}checked{% endif %} onchange="onRoleChanged('student')">
-                        <label for="role_student" class="cursor-pointer block p-4 rounded-2xl border border-slate-800 bg-dark-850 hover:border-slate-700 transition relative group select-none">
-                            <div class="flex items-center justify-between mb-2">
-                                <div class="h-9 w-9 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 group-hover:scale-110 transition-transform">
-                                    <i class="fa-solid fa-graduation-cap text-base"></i>
+                        <input type="radio" name="role_choice" id="role_student" value="student" class="role-radio-student hidden"
+                               {% if initial_role != 'admin' %}checked{% endif %} onchange="onRoleChanged('student')">
+                        <label for="role_student" class="cursor-pointer block p-3.5 rounded-2xl border border-slate-800 bg-dark-850 hover:border-slate-700 transition relative group select-none">
+                            <div class="flex items-center justify-between mb-1.5">
+                                <div class="h-8 w-8 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 group-hover:scale-105 transition-transform">
+                                    <i class="fa-solid fa-graduation-cap text-sm"></i>
                                 </div>
-                                <div class="check-indicator opacity-0 transition-opacity text-emerald-400">
+                                <div class="check-indicator opacity-0 transition-opacity text-teal-400">
                                     <i class="fa-solid fa-circle-check text-sm"></i>
                                 </div>
                             </div>
                             <div class="font-bold text-sm text-white">Student</div>
-                            <p class="text-[11px] text-slate-400 mt-0.5 line-clamp-1">Personal logs & portal</p>
+                            <p class="text-[10px] text-slate-400 mt-0.5 line-clamp-1">Personal logs (Read-only)</p>
                         </label>
                     </div>
 
-                    <!-- Choice 2: Admin -->
+                    <!-- Choice B: Admin -->
                     <div>
-                        <input type="radio" name="role_choice" id="role_admin" value="admin" class="role-radio hidden" {% if initial_role == 'admin' %}checked{% endif %} onchange="onRoleChanged('admin')">
-                        <label for="role_admin" class="cursor-pointer block p-4 rounded-2xl border border-slate-800 bg-dark-850 hover:border-slate-700 transition relative group select-none">
-                            <div class="flex items-center justify-between mb-2">
-                                <div class="h-9 w-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform">
-                                    <i class="fa-solid fa-user-shield text-base"></i>
+                        <input type="radio" name="role_choice" id="role_admin" value="admin" class="role-radio hidden"
+                               {% if initial_role == 'admin' %}checked{% endif %} onchange="onRoleChanged('admin')">
+                        <label for="role_admin" class="cursor-pointer block p-3.5 rounded-2xl border border-slate-800 bg-dark-850 hover:border-slate-700 transition relative group select-none">
+                            <div class="flex items-center justify-between mb-1.5">
+                                <div class="h-8 w-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform">
+                                    <i class="fa-solid fa-user-shield text-sm"></i>
                                 </div>
                                 <div class="check-indicator opacity-0 transition-opacity text-emerald-400">
                                     <i class="fa-solid fa-circle-check text-sm"></i>
                                 </div>
                             </div>
                             <div class="font-bold text-sm text-white">Admin</div>
-                            <p class="text-[11px] text-slate-400 mt-0.5 line-clamp-1">Camera, reports & roster</p>
+                            <p class="text-[10px] text-slate-400 mt-0.5 line-clamp-1">Modify, Add, Delete & Camera</p>
                         </label>
                     </div>
                 </div>
+
+                <!-- Role Access Explainer Notice -->
+                <div id="role-explainer" class="mt-3 p-2.5 rounded-xl bg-dark-800/80 border border-slate-800 text-[11px] flex items-center gap-2">
+                    <i id="explainer-icon" class="fa-solid fa-graduation-cap text-teal-400"></i>
+                    <span id="explainer-text" class="text-slate-300">
+                        Students have read-only access to their personal attendance history. Students cannot add, edit, or delete records.
+                    </span>
+                </div>
             </div>
 
-            <!-- Role Context Badge -->
-            <div class="mb-6 p-3 rounded-xl bg-dark-800/80 border border-slate-800 flex items-center justify-between text-xs">
-                <span class="text-slate-400">Authenticating as:</span>
-                <span id="role-badge" class="font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
-                    <i id="role-icon" class="fa-solid fa-graduation-cap"></i>
-                    <span id="role-name">Student</span>
-                </span>
+            <!-- Firebase Google & GitHub Quick Action Buttons (Two Providers) -->
+            <div class="mb-5">
+                <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                    <span>Social Authentication Options:</span>
+                    <span class="text-[10px] text-slate-500 font-normal">Google &amp; GitHub</span>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <!-- Option 1: Google -->
+                    <button type="button" onclick="handleSocialAuth('google')" 
+                            class="py-2.5 px-3 rounded-xl bg-dark-850 hover:bg-dark-800 border border-slate-700 text-xs font-semibold text-white transition flex items-center justify-center gap-2 shadow-sm hover:border-slate-600 group">
+                        <svg class="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24">
+                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                        </svg>
+                        <span id="google-btn-text">Google</span>
+                    </button>
+
+                    <!-- Option 2: GitHub -->
+                    <button type="button" onclick="handleSocialAuth('github')" 
+                            class="py-2.5 px-3 rounded-xl bg-dark-850 hover:bg-dark-800 border border-slate-700 text-xs font-semibold text-white transition flex items-center justify-center gap-2 shadow-sm hover:border-slate-600 group">
+                        <i class="fa-brands fa-github text-base text-white"></i>
+                        <span id="github-btn-text">GitHub</span>
+                    </button>
+                </div>
             </div>
 
-            <!-- SECTION 2: SOCIAL AUTHENTICATION (GOOGLE & GITHUB) -->
-            <div class="space-y-3 mb-6">
-                <label class="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                    Step 2: Sign In with Social Account
-                </label>
-
-                <!-- OPTION 1: LOGIN WITH GOOGLE -->
-                <button type="button" onclick="handleSocialLogin('google')" 
-                        class="w-full bg-white hover:bg-slate-100 text-slate-900 font-semibold text-xs py-3 px-4 rounded-xl shadow-lg shadow-white/5 transition flex items-center justify-center gap-3 group relative overflow-hidden">
-                    <!-- Google SVG Logo -->
-                    <svg class="w-4 h-4" viewBox="0 0 24 24">
-                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-                    </svg>
-                    <span>Continue with <strong class="font-bold">Google</strong></span>
-                    <i class="fa-solid fa-arrow-right text-[10px] opacity-0 -ml-1 group-hover:opacity-100 group-hover:ml-0 transition-all text-slate-500"></i>
-                </button>
-
-                <!-- OPTION 2: LOGIN WITH GITHUB -->
-                <button type="button" onclick="handleSocialLogin('github')" 
-                        class="w-full bg-[#24292F] hover:bg-[#2f353d] text-white font-semibold text-xs py-3 px-4 rounded-xl border border-slate-700/80 shadow-lg shadow-black/20 transition flex items-center justify-center gap-3 group relative overflow-hidden">
-                    <!-- GitHub SVG Logo -->
-                    <svg class="w-4 h-4 fill-white" viewBox="0 0 24 24">
-                        <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
-                    </svg>
-                    <span>Continue with <strong class="font-bold">GitHub</strong></span>
-                    <i class="fa-solid fa-arrow-right text-[10px] opacity-0 -ml-1 group-hover:opacity-100 group-hover:ml-0 transition-all text-slate-400"></i>
-                </button>
-            </div>
-
-            <!-- Divider -->
-            <div class="relative my-6 text-center">
+            <div class="relative my-4 text-center">
                 <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-slate-800"></div></div>
                 <span class="relative bg-dark-900 px-3 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
-                    Or Use Direct Credentials
+                    Or Use Credentials
                 </span>
             </div>
 
-            <!-- SECTION 3: DIRECT CREDENTIAL FORMS -->
-            <!-- Form A: Student Portal Access -->
-            <div id="student-form-container">
-                <form method="POST" action="{{ url_for('student_login') }}" class="space-y-4">
+            <!-- ========================================== -->
+            <!-- FORM 1: LOGIN MODE - STUDENT -->
+            <!-- ========================================== -->
+            <div id="form-login-student" class="auth-form-panel">
+                <form method="POST" action="{{ url_for('login') }}" onsubmit="return handleFormSubmit(event, this)" class="space-y-4">
                     <input type="hidden" name="role" value="student">
                     <div>
                         <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                            Student Roll Number or Email
+                            Student Roll Number or Email *
                         </label>
                         <div class="relative">
                             <i class="fa-solid fa-id-card absolute left-3.5 top-3 text-xs text-slate-500"></i>
-                            <input type="text" name="student_identifier" required value="CS-2024-001" placeholder="e.g. CS-2024-001 or alex.student@gmail.com"
-                                   class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
+                            <input type="text" name="identifier" required value="CS-2024-001" placeholder="e.g. CS-2024-001 or alex.student@gmail.com"
+                                   class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 transition">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                            Password
+                            <span class="text-[10px] text-slate-500 font-normal lowercase">(optional if not configured)</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-lock absolute left-3.5 top-3 text-xs text-slate-500"></i>
+                            <input type="password" name="password" placeholder="Enter student password"
+                                   class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 transition">
                         </div>
                     </div>
 
                     <div class="pt-1">
                         <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white font-semibold text-xs py-3 rounded-xl shadow-lg shadow-teal-500/20 transition flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-graduation-cap"></i> Access Student Attendance Portal
+                            <i class="fa-solid fa-graduation-cap"></i> Sign In to Student Portal
                         </button>
                     </div>
                 </form>
             </div>
 
-            <!-- Form B: Admin Portal Access -->
-            <div id="admin-form-container" class="hidden">
-                <form method="POST" action="{{ url_for('login') }}" class="space-y-4">
+            <!-- ========================================== -->
+            <!-- FORM 2: LOGIN MODE - ADMIN -->
+            <!-- ========================================== -->
+            <div id="form-login-admin" class="auth-form-panel hidden">
+                <form method="POST" action="{{ url_for('login') }}" onsubmit="return handleFormSubmit(event, this)" class="space-y-4">
                     <input type="hidden" name="role" value="admin">
                     <div>
-                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">Admin Username</label>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                            Admin Username or Email *
+                        </label>
                         <div class="relative">
                             <i class="fa-solid fa-user absolute left-3.5 top-3 text-xs text-slate-500"></i>
-                            <input type="text" name="username" required value="admin"
+                            <input type="text" name="identifier" required value="admin" placeholder="e.g. admin or admin@visionattend.local"
                                    class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
                         </div>
                     </div>
 
                     <div>
-                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">Password</label>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">Password *</label>
                         <div class="relative">
                             <i class="fa-solid fa-lock absolute left-3.5 top-3 text-xs text-slate-500"></i>
-                            <input type="password" name="password" required value="admin123"
+                            <input type="password" name="password" required value="admin123" placeholder="Enter administrator password"
                                    class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
                         </div>
                     </div>
 
                     <div class="pt-1">
                         <button type="submit" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs py-3 rounded-xl shadow-lg shadow-emerald-500/20 transition flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-right-to-bracket"></i> Sign In to Administrator Dashboard
+                            <i class="fa-solid fa-user-shield"></i> Sign In as Administrator
                         </button>
                     </div>
                 </form>
             </div>
 
-            <!-- SECTION 4: QUICK 1-CLICK DEMO ACCESS BUTTONS -->
-            <div class="mt-6 pt-5 border-t border-slate-800/80">
-                <p class="text-[10px] text-center font-bold uppercase tracking-wider text-slate-500 mb-2.5">
-                    Quick 1-Click Evaluation Access
-                </p>
-                <div class="grid grid-cols-2 gap-2 text-xs">
-                    <a href="{{ url_for('mock_auth', role='student', provider='google') }}" 
-                       class="bg-dark-800 hover:bg-slate-800 text-teal-400 border border-slate-700/60 rounded-xl p-2.5 text-center transition flex items-center justify-center gap-1.5 font-medium hover:border-teal-500/50">
-                        <i class="fa-solid fa-bolt text-xs"></i> Student Demo
-                    </a>
-                    <a href="{{ url_for('mock_auth', role='admin', provider='google') }}" 
-                       class="bg-dark-800 hover:bg-slate-800 text-emerald-400 border border-slate-700/60 rounded-xl p-2.5 text-center transition flex items-center justify-center gap-1.5 font-medium hover:border-emerald-500/50">
-                        <i class="fa-solid fa-bolt text-xs"></i> Admin Demo
-                    </a>
-                </div>
+            <!-- ========================================== -->
+            <!-- FORM 3: REGISTER MODE - STUDENT -->
+            <!-- ========================================== -->
+            <div id="form-register-student" class="auth-form-panel hidden">
+                <form method="POST" action="{{ url_for('register') }}" onsubmit="return handleFormSubmit(event, this)" class="space-y-3">
+                    <input type="hidden" name="role" value="student">
+                    
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Full Name *</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-user-tag absolute left-3 top-2.5 text-xs text-slate-500"></i>
+                            <input type="text" name="name" required placeholder="e.g. Rahul Sharma"
+                                   class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 transition">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Student Roll Number *</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-id-badge absolute left-3 top-2.5 text-xs text-slate-500"></i>
+                            <input type="text" name="roll_number" required placeholder="e.g. CS-2024-002"
+                                   class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 uppercase focus:outline-none focus:border-teal-500 transition">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Department *</label>
+                        <select name="department" required class="w-full bg-dark-800 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-teal-500 transition">
+                            <option value="AI & Data Science" selected>AI & Data Science</option>
+                            <option value="Computer Science & Eng">Computer Science & Eng</option>
+                            <option value="Information Technology">Information Technology</option>
+                            <option value="Electronics & Comm">Electronics & Comm</option>
+                            <option value="Mechanical Engineering">Mechanical Engineering</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Email Address</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-envelope absolute left-3 top-2.5 text-xs text-slate-500"></i>
+                            <input type="email" name="email" placeholder="rahul.student@gmail.com"
+                                   class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 transition">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Password *</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-lock absolute left-3 top-2.5 text-xs text-slate-500"></i>
+                            <input type="password" name="password" required placeholder="Create a password"
+                                   class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 transition">
+                        </div>
+                    </div>
+
+                    <div class="pt-2">
+                        <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white font-semibold text-xs py-3 rounded-xl shadow-lg shadow-teal-500/20 transition flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-user-plus"></i> Register Student Account
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- ========================================== -->
+            <!-- FORM 4: REGISTER MODE - ADMIN -->
+            <!-- ========================================== -->
+            <div id="form-register-admin" class="auth-form-panel hidden">
+                <form method="POST" action="{{ url_for('register') }}" onsubmit="return handleFormSubmit(event, this)" class="space-y-3">
+                    <input type="hidden" name="role" value="admin">
+                    
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Admin Username *</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-user-shield absolute left-3 top-2.5 text-xs text-slate-500"></i>
+                            <input type="text" name="username" required placeholder="e.g. lab_coordinator"
+                                   class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Admin Email Address</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-envelope absolute left-3 top-2.5 text-xs text-slate-500"></i>
+                            <input type="email" name="email" placeholder="admin@visionattend.edu"
+                                   class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Admin Password *</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-lock absolute left-3 top-2.5 text-xs text-slate-500"></i>
+                            <input type="password" name="password" required placeholder="Choose a strong password"
+                                   class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
+                        </div>
+                    </div>
+
+                    <div class="pt-2">
+                        <button type="submit" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs py-3 rounded-xl shadow-lg shadow-emerald-500/20 transition flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-shield-halved"></i> Register Administrator Account
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Persistence Notice -->
+            <div class="mt-5 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+                <span class="flex items-center gap-1.5">
+                    <i class="fa-solid fa-database text-emerald-400 text-xs"></i>
+                    <span>Permanent DB Storage</span>
+                </span>
+                <span class="text-slate-400 font-mono">SQLite WAL &bull; PBKDF2/scrypt</span>
             </div>
 
         </div>
 
-        <p class="text-center text-xs text-slate-500 mt-6">
-            VisionAttend Biometrics &bull; OpenCV Deep Neural Network Biometric Guard
+        <!-- Footer Info -->
+        <p class="text-center text-xs text-slate-500 mt-6 flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-shield-check text-emerald-400"></i>
+            <span>VisionAttend Biometrics &bull; Real-Time AI Camera &amp; Access Guard</span>
         </p>
     </div>
 
-    <!-- Interactive Social Login Modal (Shown for interactive Google/GitHub simulator or OAuth config) -->
-    <div id="social-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-dark-900 border border-slate-700/80 rounded-3xl max-w-md w-full p-6 shadow-2xl relative">
-            <button onclick="closeSocialModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white p-2">
-                <i class="fa-solid fa-xmark text-lg"></i>
-            </button>
-
-            <!-- Modal Header -->
-            <div class="flex items-center gap-3 mb-4">
-                <div id="modal-provider-icon" class="h-10 w-10 rounded-xl bg-white flex items-center justify-center text-slate-900">
-                    <!-- Icon replaced dynamically -->
-                </div>
-                <div>
-                    <h3 id="modal-title" class="font-bold text-white text-base">Sign In with Social Account</h3>
-                    <p id="modal-subtitle" class="text-xs text-slate-400">Authenticating as Student</p>
-                </div>
-            </div>
-
-            <p class="text-xs text-slate-300 mb-4" id="modal-desc">
-                Select an account or enter custom credentials to continue:
-            </p>
-
-            <form method="POST" action="{{ url_for('mock_auth_post') }}" class="space-y-3">
-                <input type="hidden" name="provider" id="modal-input-provider" value="google">
-                <input type="hidden" name="role" id="modal-input-role" value="student">
-
-                <div>
-                    <label class="block text-[11px] font-semibold text-slate-400 mb-1">Full Name</label>
-                    <input type="text" name="name" id="modal-input-name" required
-                           class="w-full bg-dark-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
-                </div>
-
-                <div>
-                    <label class="block text-[11px] font-semibold text-slate-400 mb-1">Email Address</label>
-                    <input type="email" name="email" id="modal-input-email" required
-                           class="w-full bg-dark-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
-                </div>
-
-                <div id="modal-roll-container">
-                    <label class="block text-[11px] font-semibold text-slate-400 mb-1">Student Roll Number</label>
-                    <input type="text" name="roll_number" id="modal-input-roll" value="CS-2024-001"
-                           class="w-full bg-dark-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
-                </div>
-
-                <div class="pt-3 flex gap-2">
-                    <button type="button" onclick="closeSocialModal()" class="w-1/2 py-2.5 rounded-xl border border-slate-700 text-xs font-medium text-slate-300 hover:bg-slate-800 transition">
-                        Cancel
-                    </button>
-                    <button type="submit" id="modal-submit-btn" class="w-1/2 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold shadow-lg transition flex items-center justify-center gap-1.5">
-                        <i class="fa-solid fa-check"></i> Continue
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- JavaScript for Dynamic Role Switching & Social Login Actions -->
+    <!-- Firebase & Frontend Orchestration Script -->
     <script>
+        // Server State passed via Jinja template
+        let currentMode = "{{ initial_mode or 'login' }}";
         let currentRole = "{{ initial_role or 'student' }}";
+        const firebaseProjectId = "{{ firebase_project_id }}";
+        const firebaseAuthDomain = "{{ firebase_auth_domain }}";
+        const firebaseApiKey = "{{ firebase_api_key }}";
+
+        // Initialize Firebase SDK if configuration exists or with project defaults
+        let firebaseApp = null;
+        let auth = null;
+        try {
+            if (typeof firebase !== 'undefined' && firebase.initializeApp) {
+                const config = {
+                    apiKey: firebaseApiKey || "AIzaSyFakeKeyForLocalSimulatorFallback",
+                    authDomain: firebaseAuthDomain || `${firebaseProjectId}.firebaseapp.com`,
+                    projectId: firebaseProjectId || "ai-attendance-14ab6",
+                    storageBucket: `${firebaseProjectId}.appspot.com`
+                };
+                firebaseApp = firebase.initializeApp(config);
+                auth = firebase.auth();
+            }
+        } catch (e) {
+            console.warn("[Firebase Init]", e);
+        }
+
+        function switchAuthMode(mode) {
+            currentMode = mode;
+            const loginBtn = document.getElementById('tab-btn-login');
+            const regBtn = document.getElementById('tab-btn-register');
+            const modeHelper = document.getElementById('mode-helper-text');
+            const googleBtnText = document.getElementById('google-btn-text');
+
+            if (mode === 'login') {
+                loginBtn.className = 'py-2.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 bg-emerald-500 text-white shadow-lg shadow-emerald-500/20';
+                regBtn.className = 'py-2.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 text-slate-400 hover:text-white';
+                modeHelper.textContent = 'Already registered? Log in directly';
+                googleBtnText.textContent = 'Sign In with Google (Firebase)';
+            } else {
+                regBtn.className = 'py-2.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 bg-emerald-500 text-white shadow-lg shadow-emerald-500/20';
+                loginBtn.className = 'py-2.5 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 text-slate-400 hover:text-white';
+                modeHelper.textContent = 'First time here? Create your account';
+                googleBtnText.textContent = 'Register with Google (Firebase)';
+            }
+            updateVisibleForm();
+        }
 
         function onRoleChanged(role) {
             currentRole = role;
-            const badge = document.getElementById('role-badge');
-            const roleName = document.getElementById('role-name');
-            const roleIcon = document.getElementById('role-icon');
-            const studentForm = document.getElementById('student-form-container');
-            const adminForm = document.getElementById('admin-form-container');
+            const explainerIcon = document.getElementById('explainer-icon');
+            const explainerText = document.getElementById('explainer-text');
 
             if (role === 'admin') {
-                roleName.textContent = 'Administrator';
-                roleIcon.className = 'fa-solid fa-user-shield';
-                badge.className = 'font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5';
-                studentForm.classList.add('hidden');
-                adminForm.classList.remove('hidden');
+                explainerIcon.className = 'fa-solid fa-user-shield text-emerald-400';
+                explainerText.innerHTML = '<strong>Administrator:</strong> Full permissions to access live camera, add, update, and delete student records, and generate reports.';
             } else {
-                roleName.textContent = 'Student';
-                roleIcon.className = 'fa-solid fa-graduation-cap';
-                badge.className = 'font-bold px-2.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 flex items-center gap-1.5';
-                studentForm.classList.remove('hidden');
-                adminForm.classList.add('hidden');
+                explainerIcon.className = 'fa-solid fa-graduation-cap text-teal-400';
+                explainerText.innerHTML = '<strong>Student:</strong> Read-only access to personal attendance. Students cannot modify, edit, or delete any records.';
+            }
+            updateVisibleForm();
+        }
+
+        function updateVisibleForm() {
+            // Hide all 4 panels
+            document.querySelectorAll('.auth-form-panel').forEach(panel => panel.classList.add('hidden'));
+
+            // Show selected panel
+            const targetId = `form-${currentMode}-${currentRole}`;
+            const targetPanel = document.getElementById(targetId);
+            if (targetPanel) {
+                targetPanel.classList.remove('hidden');
             }
         }
 
-        // Initialize state on load
+        function showError(msg) {
+            const box = document.getElementById('dynamic-error-box');
+            const text = document.getElementById('dynamic-error-text');
+            const sub = document.getElementById('dynamic-error-sub');
+
+            text.textContent = msg;
+            if (msg.toLowerCase().includes('already registered')) {
+                sub.textContent = 'This account is already registered. Please switch to the Login tab to sign in.';
+            } else {
+                sub.textContent = 'Please verify your information and try again.';
+            }
+            box.classList.remove('hidden');
+            box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function dismissError() {
+            document.getElementById('dynamic-error-box').classList.add('hidden');
+        }
+
+        // Asynchronous form interceptor for responsive inline duplicate alerts
+        async function handleFormSubmit(event, form) {
+            event.preventDefault();
+            dismissError();
+
+            const submitBtn = form.querySelector('button[type="submit"]');
+            const originalBtnHtml = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
+
+            const formData = new FormData(form);
+            const jsonData = {};
+            formData.forEach((value, key) => { jsonData[key] = value; });
+
+            try {
+                const response = await fetch(form.action, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify(jsonData)
+                });
+
+                const data = await response.json().catch(() => null);
+
+                if (response.ok && data && data.status) {
+                    window.location.href = data.redirect || '/';
+                } else {
+                    const errorMsg = (data && data.message) ? data.message : 'An error occurred during authentication.';
+                    showError(errorMsg);
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalBtnHtml;
+                }
+            } catch (err) {
+                console.warn("[Fetch fallback to form submit]", err);
+                // Fallback to standard form submission if fetch or JSON fails
+                form.submit();
+            }
+            return false;
+        }
+
+        // Firebase Google Popup Authentication
+        async function handleFirebaseGoogleAuth() {
+            dismissError();
+            if (!auth) {
+                // If Firebase auth is not initialized, direct to Google auth route
+                window.location.href = `/auth/google?role=${currentRole}`;
+                return;
+            }
+
+            try {
+                const provider = new firebase.auth.GoogleAuthProvider();
+                const result = await auth.signInWithPopup(provider);
+                const user = result.user;
+
+                // Sync with backend /api/firebase_auth
+                const response = await fetch('/api/firebase_auth', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: currentMode,
+                        role: currentRole,
+                        uid: user.uid,
+                        email: user.email,
+                        name: user.displayName || user.email.split('@')[0],
+                    })
+                });
+
+                const data = await response.json();
+                if (data.status) {
+                    window.location.href = data.redirect || '/';
+                } else {
+                    showError(data.message || 'Firebase authentication failed.');
+                }
+            } catch (error) {
+                console.warn("[Firebase Popup Error]", error);
+                if (error.code === 'auth/api-key-not-valid' || error.code === 'auth/invalid-api-key' || error.code === 'auth/operation-not-supported-in-this-environment') {
+                    // Fallback seamlessly to server OAuth route
+                    window.location.href = `/auth/google?role=${currentRole}`;
+                } else {
+                    showError(error.message || 'Google authentication was cancelled or failed.');
+                }
+            }
+        }
+
+        // Initialize state on page load
         document.addEventListener('DOMContentLoaded', () => {
-            const initial = document.querySelector('input[name="role_choice"]:checked')?.value || 'student';
-            onRoleChanged(initial);
+            switchAuthMode(currentMode);
+            const initialRoleInput = document.querySelector('input[name="role_choice"]:checked');
+            if (initialRoleInput) {
+                onRoleChanged(initialRoleInput.value);
+            }
         });
-
-        function handleSocialLogin(provider) {
-            // Direct request to oauth route with selected role parameter
-            // The backend handles real OAuth (if keys set) or launches the simulator!
-            window.location.href = `/auth/${provider}?role=${currentRole}`;
-        }
-
-        function openSocialSimulator(provider, role) {
-            const modal = document.getElementById('social-modal');
-            const icon = document.getElementById('modal-provider-icon');
-            const title = document.getElementById('modal-title');
-            const subtitle = document.getElementById('modal-subtitle');
-            const rollContainer = document.getElementById('modal-roll-container');
-
-            document.getElementById('modal-input-provider').value = provider;
-            document.getElementById('modal-input-role').value = role;
-
-            if (provider === 'google') {
-                icon.innerHTML = `<svg class="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>`;
-                title.textContent = `Sign in with Google (${role.toUpperCase()})`;
-            } else {
-                icon.innerHTML = `<svg class="w-5 h-5 fill-slate-900" viewBox="0 0 24 24"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>`;
-                title.textContent = `Sign in with GitHub (${role.toUpperCase()})`;
-            }
-
-            if (role === 'admin') {
-                subtitle.textContent = "Logging into System Administration";
-                rollContainer.classList.add('hidden');
-                document.getElementById('modal-input-name').value = "System Administrator";
-                document.getElementById('modal-input-email').value = provider === 'google' ? "admin.vision@gmail.com" : "admin@github.com";
-            } else {
-                subtitle.textContent = "Logging into Student Attendance Portal";
-                rollContainer.classList.remove('hidden');
-                document.getElementById('modal-input-name').value = "Alex Johnson";
-                document.getElementById('modal-input-email').value = provider === 'google' ? "alex.student@gmail.com" : "alex-student@github.com";
-                document.getElementById('modal-input-roll').value = "CS-2024-001";
-            }
-
-            modal.classList.remove('hidden');
-        }
-
-        function closeSocialModal() {
-            document.getElementById('social-modal').classList.add('hidden');
-        }
-
-        // Show modal if trigger passed via URL query
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('simulate') === '1') {
-            const prov = urlParams.get('provider') || 'google';
-            const r = urlParams.get('role') || 'student';
-            openSocialSimulator(prov, r);
-        }
     </script>
 </body>
 </html>

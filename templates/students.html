@@ -11,9 +11,11 @@
             <h1 class="text-2xl font-bold text-white tracking-tight">Student Enrollment & Directory</h1>
             <p class="text-xs text-slate-400 mt-1">Manage registered students and enroll facial biometric vectors.</p>
         </div>
+        {% if is_admin %}
         <button onclick="openEnrollModal()" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 transition">
             <i class="fa-solid fa-user-plus text-sm"></i> Register New Student
         </button>
+        {% endif %}
     </div>
 
     <!-- Student Cards / Table Section -->
@@ -70,9 +72,20 @@
                             </td>
                             <td class="px-5 py-3.5 text-slate-400 font-mono text-[11px]">{{ s.created_at[:10] }}</td>
                             <td class="px-5 py-3.5 text-right">
-                                <button onclick="deleteStudent('{{ s.roll_number }}', '{{ s.name }}')" class="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 p-2 rounded-lg transition" title="Delete Student">
-                                    <i class="fa-solid fa-trash-can"></i>
-                                </button>
+                                {% if is_admin %}
+                                <div class="inline-flex items-center space-x-1">
+                                    <button onclick="openEditModal('{{ s.roll_number }}', '{{ s.name|escape }}', '{{ s.department|escape }}', '{{ (s.email or "")|escape }}')" 
+                                            class="text-teal-400 hover:text-teal-300 hover:bg-teal-500/10 p-2 rounded-lg transition" title="Update Student">
+                                        <i class="fa-solid fa-pen-to-square"></i>
+                                    </button>
+                                    <button onclick="deleteStudent('{{ s.roll_number }}', '{{ s.name|escape }}')" 
+                                            class="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 p-2 rounded-lg transition" title="Delete Student">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </button>
+                                </div>
+                                {% else %}
+                                <span class="text-[11px] text-slate-500 italic">Admin only</span>
+                                {% endif %}
                             </td>
                         </tr>
                         {% endfor %}
@@ -213,6 +226,78 @@
                     </button>
                     <button type="submit" id="enroll-submit-btn" class="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs shadow-md shadow-emerald-500/20 transition flex items-center gap-1.5">
                         <i class="fa-solid fa-check"></i> Save & Enroll Biometrics
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Student Update / Edit Modal -->
+<div id="edit-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-dark-900 border border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+        <!-- Modal Header -->
+        <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-dark-850">
+            <div class="flex items-center space-x-2.5">
+                <div class="h-8 w-8 rounded-lg bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400">
+                    <i class="fa-solid fa-pen-to-square text-sm"></i>
+                </div>
+                <div>
+                    <h3 class="text-sm font-bold text-white">Update Student Record</h3>
+                    <p class="text-[11px] text-slate-400">Modify student information & synchronize attendance records</p>
+                </div>
+            </div>
+            <button onclick="closeEditModal()" class="text-slate-400 hover:text-white text-sm">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="p-5 overflow-y-auto space-y-4">
+            <div id="edit-modal-alert" class="hidden p-3 rounded-xl text-xs flex items-center gap-2"></div>
+
+            <form id="edit-form" onsubmit="submitEditStudent(event)">
+                <input type="hidden" id="edit-orig-roll">
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Full Name *</label>
+                        <input type="text" id="edit-name" required
+                               class="w-full bg-dark-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Roll Number *</label>
+                        <input type="text" id="edit-roll" required
+                               class="w-full bg-dark-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 uppercase">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Department *</label>
+                        <select id="edit-dept" required class="w-full bg-dark-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-teal-500">
+                            <option value="Computer Science">Computer Science & Eng</option>
+                            <option value="Information Tech">Information Technology</option>
+                            <option value="AI & Data Science">AI & Data Science</option>
+                            <option value="Electronics & Comm">Electronics & Comm</option>
+                            <option value="Mechanical Eng">Mechanical Engineering</option>
+                            <option value="Civil Eng">Civil Engineering</option>
+                            <option value="Electrical Eng">Electrical Engineering</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Email</label>
+                        <input type="email" id="edit-email" placeholder="student@college.edu"
+                               class="w-full bg-dark-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+                    </div>
+                </div>
+
+                <div class="mt-6 flex items-center justify-end space-x-2 pt-4 border-t border-slate-800">
+                    <button type="button" onclick="closeEditModal()" class="px-4 py-2.5 rounded-xl border border-slate-700 text-slate-400 hover:text-white text-xs transition">
+                        Cancel
+                    </button>
+                    <button type="submit" id="edit-submit-btn" class="px-6 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-600 text-white font-semibold text-xs shadow-md shadow-teal-500/20 transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-check"></i> Save Changes
                     </button>
                 </div>
             </form>
@@ -512,6 +597,65 @@
             submitBtn.disabled = false;
             submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Save & Enroll Biometrics';
             showModalAlert("Error communicating with server: " + err.message, "error");
+            showToast("Error: " + err.message, "error");
+        }
+    }
+
+    function openEditModal(origRoll, name, dept, email) {
+        document.getElementById('edit-orig-roll').value = origRoll;
+        document.getElementById('edit-name').value = name;
+        document.getElementById('edit-roll').value = origRoll;
+        document.getElementById('edit-dept').value = dept;
+        document.getElementById('edit-email').value = email || '';
+        document.getElementById('edit-modal-alert').classList.add('hidden');
+        document.getElementById('edit-modal').classList.remove('hidden');
+    }
+
+    function closeEditModal() {
+        document.getElementById('edit-modal').classList.add('hidden');
+    }
+
+    async function submitEditStudent(e) {
+        e.preventDefault();
+        const origRoll = document.getElementById('edit-orig-roll').value;
+        const name = document.getElementById('edit-name').value.trim();
+        const newRoll = document.getElementById('edit-roll').value.trim().toUpperCase();
+        const dept = document.getElementById('edit-dept').value;
+        const email = document.getElementById('edit-email').value.trim();
+
+        const submitBtn = document.getElementById('edit-submit-btn');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Updating...';
+
+        try {
+            const response = await fetch(`/api/update_student/${encodeURIComponent(origRoll)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: name,
+                    roll_number: newRoll,
+                    department: dept,
+                    email: email
+                })
+            });
+            const data = await response.json();
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Save Changes';
+
+            if (data.status) {
+                showToast(data.message, "success");
+                closeEditModal();
+                setTimeout(() => window.location.reload(), 600);
+            } else {
+                const el = document.getElementById('edit-modal-alert');
+                el.className = 'mb-3 p-3 rounded-xl text-xs flex items-center gap-2 bg-rose-500/10 text-rose-300 border border-rose-500/30';
+                el.innerHTML = `<i class="fa-solid fa-circle-exclamation text-rose-400"></i><span>${data.message || 'Failed to update student.'}</span>`;
+                el.classList.remove('hidden');
+                showToast(data.message || 'Update failed', "error");
+            }
+        } catch (err) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Save Changes';
             showToast("Error: " + err.message, "error");
         }
     }

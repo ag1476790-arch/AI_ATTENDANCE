@@ -8,8 +8,11 @@ DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'attendance.db')
 
 def get_connection():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30.0)
     conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA foreign_keys = ON;')
+    conn.execute('PRAGMA journal_mode = WAL;')
+    conn.execute('PRAGMA synchronous = NORMAL;')
     return conn
 
 def init_db():
@@ -74,26 +77,50 @@ def init_db():
         )
     ''')
 
+    # Dynamic schema migrations for students (password and firebase_uid)
+    cursor.execute("PRAGMA table_info(students)")
+    student_cols = [row['name'] for row in cursor.fetchall()]
+    if 'password' not in student_cols:
+        cursor.execute("ALTER TABLE students ADD COLUMN password TEXT DEFAULT ''")
+    if 'firebase_uid' not in student_cols:
+        cursor.execute("ALTER TABLE students ADD COLUMN firebase_uid TEXT DEFAULT ''")
+
+    # Dynamic schema migrations for admins (email and firebase_uid)
+    cursor.execute("PRAGMA table_info(admins)")
+    admin_cols = [row['name'] for row in cursor.fetchall()]
+    if 'email' not in admin_cols:
+        cursor.execute("ALTER TABLE admins ADD COLUMN email TEXT DEFAULT ''")
+    if 'firebase_uid' not in admin_cols:
+        cursor.execute("ALTER TABLE admins ADD COLUMN firebase_uid TEXT DEFAULT ''")
+
     # Create the first admin if none exists
     cursor.execute('SELECT COUNT(*) as count FROM admins')
     if cursor.fetchone()['count'] == 0:
         username = os.environ.get('ADMIN_USERNAME', 'admin').strip()
         password = os.environ.get('ADMIN_PASSWORD', 'admin123')
         cursor.execute(
-            'INSERT INTO admins (username, password) VALUES (?, ?)',
-            (username, generate_password_hash(password))
+            'INSERT INTO admins (username, password, email) VALUES (?, ?, ?)',
+            (username, generate_password_hash(password), 'admin@visionattend.local')
         )
 
     conn.commit()
     conn.close()
 
-def verify_admin(username, password):
+def verify_admin(identifier, password):
+    """
+    Verifies administrator credentials by Username or Email.
+    Returns True if valid, False otherwise.
+    """
+    if not identifier or not password:
+        return False
     conn = get_connection()
     cursor = conn.cursor()
     try:
+        clean_id = identifier.strip()
         cursor.execute(
-            'SELECT id, password FROM admins WHERE username = ?',
-            (username.strip(),)
+            '''SELECT id, password FROM admins 
+               WHERE LOWER(username) = LOWER(?) OR (email != '' AND LOWER(email) = LOWER(?))''',
+            (clean_id, clean_id)
         )
         admin = cursor.fetchone()
         if admin is None:
@@ -112,6 +139,100 @@ def verify_admin(username, password):
             conn.commit()
             return True
         return False
+    finally:
+        conn.close()
+
+def verify_student(identifier, password=''):
+    """
+    Verifies student credentials by Roll Number or Email.
+    Returns: (success: bool, student_or_msg: dict/str)
+    """
+    if not identifier:
+        return False, "Student Roll Number or Email is required."
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        clean_id = identifier.strip()
+        cursor.execute('''
+            SELECT * FROM students 
+            WHERE LOWER(roll_number) = LOWER(?) OR (email != '' AND LOWER(email) = LOWER(?))
+        ''', (clean_id, clean_id))
+        student = cursor.fetchone()
+        if not student:
+            return False, f"Student account '{identifier}' not found in the database. Please register first."
+        
+        student_dict = dict(student)
+        stored_pw = student_dict.get('password', '')
+        
+        # If student has a password set, verify it
+        if stored_pw:
+            if not password:
+                return False, "Password is required to sign in."
+            submitted = password.strip()
+            if stored_pw.startswith(('scrypt:', 'pbkdf2:')):
+                if check_password_hash(stored_pw, submitted):
+                    return True, student_dict
+                return False, "Incorrect password. Please try again."
+            elif hmac.compare_digest(stored_pw, submitted):
+                cursor.execute('UPDATE students SET password = ? WHERE id = ?', (generate_password_hash(submitted), student_dict['id']))
+                conn.commit()
+                return True, student_dict
+            return False, "Incorrect password. Please try again."
+        else:
+            # If no password set yet (e.g. registered without password), set password if submitted
+            if password:
+                cursor.execute('UPDATE students SET password = ? WHERE id = ?', (generate_password_hash(password.strip()), student_dict['id']))
+                conn.commit()
+            return True, student_dict
+    finally:
+        conn.close()
+
+def register_student_user(name, roll_number, department, email='', password='', firebase_uid=''):
+    """
+    Registers a new student user. If roll number or email is already taken,
+    strictly returns (False, "Account already registered").
+    """
+    clean_name = name.strip()
+    clean_roll = roll_number.strip().upper()
+    clean_dept = department.strip()
+    clean_email = email.strip()
+    clean_pw = password.strip()
+
+    if not clean_name or not clean_roll or not clean_dept:
+        return False, "Name, Roll Number, and Department are required."
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        # Check duplicate by roll number
+        cursor.execute('SELECT id FROM students WHERE LOWER(roll_number) = LOWER(?)', (clean_roll,))
+        if cursor.fetchone():
+            return False, "Account already registered"
+
+        # Check duplicate by email if provided
+        if clean_email:
+            cursor.execute('SELECT id FROM students WHERE email != "" AND LOWER(email) = LOWER(?)', (clean_email,))
+            if cursor.fetchone():
+                return False, "Account already registered"
+
+        # Check duplicate by firebase_uid if provided
+        if firebase_uid:
+            cursor.execute('SELECT id FROM students WHERE firebase_uid != "" AND firebase_uid = ?', (firebase_uid.strip(),))
+            if cursor.fetchone():
+                return False, "Account already registered"
+
+        pw_hash = generate_password_hash(clean_pw) if clean_pw else ''
+        cursor.execute('''
+            INSERT INTO students (roll_number, name, department, email, password, firebase_uid)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (clean_roll, clean_name, clean_dept, clean_email, pw_hash, firebase_uid.strip()))
+        conn.commit()
+        return True, "Student registered successfully."
+    except sqlite3.IntegrityError:
+        return False, "Account already registered"
+    except Exception as e:
+        return False, str(e)
     finally:
         conn.close()
 
@@ -135,7 +256,7 @@ def add_student(roll_number, name, department, email='', embedding=None, photo_p
         conn.commit()
         return True, "Student registered successfully."
     except sqlite3.IntegrityError:
-        return False, f"Student with Roll Number '{roll_number}' already exists."
+        return False, "Account already registered"
     except Exception as e:
         return False, str(e)
     finally:
@@ -184,13 +305,218 @@ def get_all_embeddings():
     return [(row['roll_number'], row['name'], row['embedding']) for row in rows]
 
 def delete_student(roll_number):
+    """
+    Permanently deletes a student, their biometric records, 
+    linked attendance history, and OAuth account records.
+    """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM students WHERE roll_number = ?', (roll_number.strip().upper(),))
-    deleted = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
-    return deleted
+    try:
+        roll = roll_number.strip().upper()
+        # Delete related attendance records
+        cursor.execute('DELETE FROM attendance WHERE roll_number = ?', (roll,))
+        # Delete related oauth records
+        cursor.execute('DELETE FROM oauth_accounts WHERE roll_number = ?', (roll,))
+        # Delete student record
+        cursor.execute('DELETE FROM students WHERE roll_number = ?', (roll,))
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        return deleted
+    except Exception as e:
+        conn.rollback()
+        print(f"[DB Delete Error] {e}")
+        return False
+    finally:
+        conn.close()
+
+def update_student(original_roll, name=None, new_roll=None, department=None, email=None, embedding=None, photo_path=None):
+    """
+    Updates an enrolled student's details (Name, Roll, Department, Email, Biometrics).
+    Keeps attendance records and OAuth links synchronized if Roll Number or Name changes.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        orig = original_roll.strip().upper()
+        new_r = new_roll.strip().upper() if new_roll else orig
+
+        cursor.execute('SELECT id, name, department, email, photo_path FROM students WHERE roll_number = ?', (orig,))
+        curr = cursor.fetchone()
+        if not curr:
+            return False, f"Student with Roll Number '{orig}' does not exist."
+
+        # Verify roll number uniqueness if changing roll
+        if new_r != orig:
+            cursor.execute('SELECT id FROM students WHERE roll_number = ?', (new_r,))
+            if cursor.fetchone():
+                return False, f"Roll Number '{new_r}' is already assigned to another student."
+
+        updated_name = name.strip() if name else curr['name']
+        updated_dept = department.strip() if department else curr['department']
+        updated_email = email.strip() if email is not None else curr['email']
+        updated_photo = photo_path if photo_path else curr['photo_path']
+
+        # Update student record
+        if embedding is not None:
+            cursor.execute('''
+                UPDATE students
+                SET roll_number = ?, name = ?, department = ?, email = ?, embedding = ?, photo_path = ?
+                WHERE roll_number = ?
+            ''', (new_r, updated_name, updated_dept, updated_email, embedding, updated_photo, orig))
+        else:
+            cursor.execute('''
+                UPDATE students
+                SET roll_number = ?, name = ?, department = ?, email = ?
+                WHERE roll_number = ?
+            ''', (new_r, updated_name, updated_dept, updated_email, orig))
+
+        # Cascade updates to attendance history table
+        cursor.execute('''
+            UPDATE attendance
+            SET roll_number = ?, name = ?, department = ?
+            WHERE roll_number = ?
+        ''', (new_r, updated_name, updated_dept, orig))
+
+        # Cascade updates to oauth_accounts table
+        if new_r != orig:
+            cursor.execute('''
+                UPDATE oauth_accounts
+                SET roll_number = ?
+                WHERE roll_number = ?
+            ''', (new_r, orig))
+
+        conn.commit()
+        return True, f"Student '{updated_name}' ({new_r}) updated successfully."
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        conn.close()
+
+def register_admin(username, password, email=None, firebase_uid=''):
+    """Creates a new administrator account with salted PBKDF2/scrypt password hash."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        user = username.strip()
+        pw = password.strip()
+        em = email.strip() if email else ''
+        if not user or not pw:
+            return False, "Username and password are required."
+
+        # Check duplicate username
+        cursor.execute('SELECT id FROM admins WHERE LOWER(username) = LOWER(?)', (user,))
+        if cursor.fetchone():
+            return False, "Account already registered"
+
+        # Check duplicate email if provided
+        if em:
+            cursor.execute('SELECT id FROM admins WHERE email != "" AND LOWER(email) = LOWER(?)', (em,))
+            if cursor.fetchone():
+                return False, "Account already registered"
+
+        # Check duplicate firebase_uid if provided
+        if firebase_uid:
+            cursor.execute('SELECT id FROM admins WHERE firebase_uid != "" AND firebase_uid = ?', (firebase_uid.strip(),))
+            if cursor.fetchone():
+                return False, "Account already registered"
+
+        cursor.execute(
+            'INSERT INTO admins (username, password, email, firebase_uid) VALUES (?, ?, ?, ?)',
+            (user, generate_password_hash(pw), em, firebase_uid.strip())
+        )
+        conn.commit()
+        return True, f"Admin account '{user}' registered successfully."
+    except sqlite3.IntegrityError:
+        return False, "Account already registered"
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        conn.close()
+
+def get_admin_by_identifier(identifier):
+    """Retrieves admin record by username or email."""
+    if not identifier:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        clean = identifier.strip().lower()
+        cursor.execute(
+            'SELECT id, username, email, firebase_uid, created_at FROM admins WHERE LOWER(username) = ? OR (email != "" AND LOWER(email) = ?)',
+            (clean, clean)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def get_admin_by_uid(firebase_uid):
+    """Retrieves admin record by Firebase UID."""
+    if not firebase_uid:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            'SELECT id, username, email, firebase_uid, created_at FROM admins WHERE firebase_uid != "" AND firebase_uid = ?',
+            (firebase_uid.strip(),)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def get_student_by_uid(firebase_uid):
+    """Retrieves student record by Firebase UID."""
+    if not firebase_uid:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            'SELECT * FROM students WHERE firebase_uid != "" AND firebase_uid = ?',
+            (firebase_uid.strip(),)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def link_admin_firebase(identifier, firebase_uid):
+    """Links a Firebase UID to an existing admin account."""
+    if not identifier or not firebase_uid:
+        return False
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        clean = identifier.strip().lower()
+        cursor.execute(
+            'UPDATE admins SET firebase_uid = ? WHERE (LOWER(username) = ? OR LOWER(email) = ?) AND (firebase_uid IS NULL OR firebase_uid = "")',
+            (firebase_uid.strip(), clean, clean)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+def link_student_firebase(identifier, firebase_uid):
+    """Links a Firebase UID to an existing student record."""
+    if not identifier or not firebase_uid:
+        return False
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        clean = identifier.strip().lower()
+        cursor.execute(
+            'UPDATE students SET firebase_uid = ? WHERE (LOWER(roll_number) = ? OR LOWER(email) = ?) AND (firebase_uid IS NULL OR firebase_uid = "")',
+            (firebase_uid.strip(), clean, clean)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
 def mark_attendance(roll_number, confidence=0.0):
     """
