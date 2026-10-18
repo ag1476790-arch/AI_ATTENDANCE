@@ -63,6 +63,14 @@
 
                 <!-- Navigation Links -->
                 <nav class="hidden md:flex items-center space-x-1">
+                    {% if session.get('role') == 'student' %}
+                    <a href="{{ url_for('student_portal') }}" class="px-3.5 py-2 rounded-lg text-sm font-medium transition-all {% if active_page == 'student_portal' %}bg-teal-500/10 text-teal-400 border border-teal-500/20{% else %}text-slate-300 hover:text-white hover:bg-slate-800/60{% endif %}">
+                        <i class="fa-solid fa-graduation-cap mr-1.5 text-xs"></i> My Attendance Portal
+                    </a>
+                    <a href="{{ url_for('theory') }}" class="px-3.5 py-2 rounded-lg text-sm font-medium transition-all {% if active_page == 'theory' %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20{% else %}text-slate-300 hover:text-white hover:bg-slate-800/60{% endif %}">
+                        <i class="fa-solid fa-book-open mr-1.5 text-xs"></i> OpenCV Theory
+                    </a>
+                    {% else %}
                     <a href="{{ url_for('dashboard') }}" class="px-3.5 py-2 rounded-lg text-sm font-medium transition-all {% if active_page == 'dashboard' %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20{% else %}text-slate-300 hover:text-white hover:bg-slate-800/60{% endif %}">
                         <i class="fa-solid fa-gauge-high mr-1.5 text-xs"></i> Dashboard
                     </a>
@@ -75,9 +83,10 @@
                     <a href="{{ url_for('theory') }}" class="px-3.5 py-2 rounded-lg text-sm font-medium transition-all {% if active_page == 'theory' %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20{% else %}text-slate-300 hover:text-white hover:bg-slate-800/60{% endif %}">
                         <i class="fa-solid fa-graduation-cap mr-1.5 text-xs"></i> OpenCV Theory
                     </a>
+                    {% endif %}
                 </nav>
 
-                <!-- Live Status Badge & Admin Profile -->
+                <!-- Live Status Badge & User Profile -->
                 <div class="flex items-center space-x-3">
                     <div class="hidden sm:flex items-center gap-2 bg-dark-800/80 px-3 py-1.5 rounded-full border border-slate-700/60 text-xs">
                         <span class="relative flex h-2 w-2">
@@ -87,10 +96,33 @@
                         <span class="text-slate-300 font-mono" id="system-time">--:--:--</span>
                     </div>
 
-                    {% if session.get('admin_user') %}
+                    {% if session.get('role') == 'student' %}
                     <div class="flex items-center gap-2">
-                        <span class="text-xs text-slate-300 bg-dark-800 border border-slate-700/80 px-2.5 py-1 rounded-lg">
-                            <i class="fa-solid fa-user-shield text-emerald-400 mr-1"></i> {{ session.get('admin_user') }}
+                        <span class="text-xs text-teal-300 bg-teal-500/10 border border-teal-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                            {% if session.get('auth_provider') == 'google' %}
+                            <i class="fa-brands fa-google text-red-400"></i>
+                            {% elif session.get('auth_provider') == 'github' %}
+                            <i class="fa-brands fa-github text-white"></i>
+                            {% else %}
+                            <i class="fa-solid fa-graduation-cap text-teal-400"></i>
+                            {% endif %}
+                            <span>{{ session.get('student_user') or session.get('student_roll') or 'Student' }}</span>
+                        </span>
+                        <a href="{{ url_for('logout') }}" class="text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 p-1.5 rounded-lg transition" title="Logout">
+                            <i class="fa-solid fa-right-from-bracket"></i>
+                        </a>
+                    </div>
+                    {% elif session.get('admin_user') %}
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs text-slate-300 bg-dark-800 border border-slate-700/80 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                            {% if session.get('auth_provider') == 'google' %}
+                            <i class="fa-brands fa-google text-red-400"></i>
+                            {% elif session.get('auth_provider') == 'github' %}
+                            <i class="fa-brands fa-github text-white"></i>
+                            {% else %}
+                            <i class="fa-solid fa-user-shield text-emerald-400"></i>
+                            {% endif %}
+                            <span>{{ session.get('admin_user') }}</span>
                         </span>
                         <a href="{{ url_for('logout') }}" class="text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 p-1.5 rounded-lg transition" title="Logout">
                             <i class="fa-solid fa-right-from-bracket"></i>
@@ -98,7 +130,7 @@
                     </div>
                     {% else %}
                     <a href="{{ url_for('login') }}" class="text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
-                        <i class="fa-solid fa-user-lock text-emerald-400"></i> Admin Login
+                        <i class="fa-solid fa-right-to-bracket text-emerald-400"></i> Sign In / Portal
                     </a>
                     {% endif %}
                 </div>

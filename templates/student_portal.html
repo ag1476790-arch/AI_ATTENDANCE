@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block title %}Student Attendance Portal | VisionAttend AI{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Top Student Profile Banner -->
+    <div class="bg-gradient-to-r from-dark-900 via-dark-850 to-dark-900 rounded-3xl p-6 sm:p-8 border border-slate-800 shadow-xl relative overflow-hidden">
+        <div class="absolute -right-16 -top-16 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div class="flex flex-col sm:flex-row items-center sm:items-start gap-6 relative z-10">
+            <!-- Student Avatar / Photo -->
+            <div class="relative flex-shrink-0">
+                <div class="h-24 w-24 sm:h-28 sm:w-28 rounded-2xl bg-dark-800 border-2 border-teal-500/40 p-1 overflow-hidden shadow-xl flex items-center justify-center">
+                    {% if student.photo_path and student.photo_path.endswith(('.jpg', '.png', '.jpeg')) %}
+                    <img src="{{ url_for('serve_dataset_image', filename=student.photo_path.split('\\')[-1].split('/')[-1]) }}" 
+                         alt="{{ student.name }}" class="h-full w-full object-cover rounded-xl">
+                    {% elif user_session.get('avatar') %}
+                    <img src="{{ user_session.avatar }}" alt="{{ student.name }}" class="h-full w-full object-cover rounded-xl">
+                    {% else %}
+                    <div class="h-full w-full rounded-xl bg-gradient-to-tr from-teal-600 to-emerald-500 flex items-center justify-center text-white text-3xl font-extrabold">
+                        {{ student.name[:1] }}
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <span class="absolute -bottom-2 -right-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-dark-900 border border-teal-500/40 text-teal-300 shadow">
+                    Student
+                </span>
+            </div>
+
+            <!-- Student Meta Info -->
+            <div class="flex-1 text-center sm:text-left space-y-2">
+                <div class="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
+                    <h2 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">{{ student.name }}</h2>
+                    <span class="px-3 py-1 rounded-full text-xs font-mono font-bold bg-teal-500/10 text-teal-400 border border-teal-500/30">
+                        {{ student.roll_number }}
+                    </span>
+                    {% if user_session.get('provider') == 'google' %}
+                    <span class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-white/10 text-slate-200 border border-white/20 flex items-center gap-1.5">
+                        <i class="fa-brands fa-google text-red-400"></i> Google Account
+                    </span>
+                    {% elif user_session.get('provider') == 'github' %}
+                    <span class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#24292F] text-slate-200 border border-slate-700 flex items-center gap-1.5">
+                        <i class="fa-brands fa-github text-white"></i> GitHub Account
+                    </span>
+                    {% endif %}
+                </div>
+
+                <p class="text-xs sm:text-sm text-slate-400">
+                    <i class="fa-solid fa-building-columns text-slate-500 mr-1.5"></i> Department: <span class="text-slate-200 font-medium">{{ student.department }}</span>
+                    {% if student.email %}
+                    <span class="hidden sm:inline mx-2 text-slate-600">&bull;</span>
+                    <i class="fa-solid fa-envelope text-slate-500 mr-1.5"></i> <span class="text-slate-300">{{ student.email }}</span>
+                    {% endif %}
+                </p>
+
+                <!-- Biometric Enrollment Status -->
+                <div class="pt-2 flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                    {% if student.embedding %}
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        <i class="fa-solid fa-fingerprint text-xs"></i> 128-D Biometric Embedding Enrolled
+                    </span>
+                    {% else %}
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                        <i class="fa-solid fa-circle-info text-xs"></i> Biometric Vector: Register at Admin Station
+                    </span>
+                    {% endif %}
+
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                        <i class="fa-solid fa-shield-halved text-xs"></i> Real-Time AI Auto-Logging Active
+                    </span>
+                </div>
+            </div>
+
+            <!-- Quick Action Buttons -->
+            <div class="flex-shrink-0 flex sm:flex-col gap-2">
+                <a href="{{ url_for('student_export_csv') }}" class="bg-dark-800 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 px-3.5 py-2 rounded-xl text-xs font-medium transition flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-file-csv text-emerald-400"></i> Export CSV
+                </a>
+                <a href="{{ url_for('student_export_excel') }}" class="bg-dark-800 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 px-3.5 py-2 rounded-xl text-xs font-medium transition flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-file-excel text-emerald-500"></i> Export Excel
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Attendance Metrics Grid -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Metric 1: Overall Percentage -->
+        <div class="bg-dark-850 rounded-2xl p-5 border border-slate-800 shadow-lg relative overflow-hidden">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Attendance Rate</p>
+                    <h3 class="text-3xl font-extrabold mt-1 {% if summary.attendance_rate >= 75 %}text-emerald-400{% elif summary.attendance_rate >= 60 %}text-amber-400{% else %}text-rose-400{% endif %}">
+                        {{ summary.attendance_rate }}%
+                    </h3>
+                    <p class="text-[11px] text-slate-500 mt-1">
+                        {% if summary.attendance_rate >= 75 %}
+                        <span class="text-emerald-400"><i class="fa-solid fa-check"></i> Eligible for exams</span>
+                        {% else %}
+                        <span class="text-rose-400"><i class="fa-solid fa-triangle-exclamation"></i> Below 75% criteria</span>
+                        {% endif %}
+                    </p>
+                </div>
+                <div class="h-12 w-12 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400">
+                    <i class="fa-solid fa-percent text-xl"></i>
+                </div>
+            </div>
+            <div class="w-full bg-slate-800 h-1.5 rounded-full mt-4 overflow-hidden">
+                <div class="h-full {% if summary.attendance_rate >= 75 %}bg-emerald-500{% elif summary.attendance_rate >= 60 %}bg-amber-500{% else %}bg-rose-500{% endif %}" style="width: {{ [summary.attendance_rate, 100]|min }}%"></div>
+            </div>
+        </div>
+
+        <!-- Metric 2: Present Count -->
+        <div class="bg-dark-850 rounded-2xl p-5 border border-slate-800 shadow-lg relative overflow-hidden">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Days Present</p>
+                    <h3 class="text-3xl font-extrabold text-white mt-1">{{ summary.present_count }}</h3>
+                    <p class="text-[11px] text-slate-500 mt-1">Verified class attendances</p>
+                </div>
+                <div class="h-12 w-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                    <i class="fa-solid fa-calendar-check text-xl"></i>
+                </div>
+            </div>
+            <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
+        </div>
+
+        <!-- Metric 3: Absent Count -->
+        <div class="bg-dark-850 rounded-2xl p-5 border border-slate-800 shadow-lg relative overflow-hidden">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Days Absent</p>
+                    <h3 class="text-3xl font-extrabold text-slate-300 mt-1">{{ summary.absent_count }}</h3>
+                    <p class="text-[11px] text-slate-500 mt-1">Unrecorded sessions</p>
+                </div>
+                <div class="h-12 w-12 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                    <i class="fa-solid fa-calendar-xmark text-xl"></i>
+                </div>
+            </div>
+            <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-500 to-amber-500"></div>
+        </div>
+
+        <!-- Metric 4: Total Sessions -->
+        <div class="bg-dark-850 rounded-2xl p-5 border border-slate-800 shadow-lg relative overflow-hidden">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Class Days</p>
+                    <h3 class="text-3xl font-extrabold text-slate-200 mt-1">{{ summary.total_classes }}</h3>
+                    <p class="text-[11px] text-slate-500 mt-1">Overall semester dates</p>
+                </div>
+                <div class="h-12 w-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                    <i class="fa-solid fa-calendar-days text-xl"></i>
+                </div>
+            </div>
+            <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-indigo-500"></div>
+        </div>
+    </div>
+
+    <!-- Today's Attendance Status Card -->
+    <div class="bg-dark-850 rounded-2xl p-6 border border-slate-800 shadow-xl">
+        <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div class="flex items-center gap-4">
+                <div class="h-12 w-12 rounded-2xl {% if summary.is_present_today %}bg-emerald-500/10 border border-emerald-500/30 text-emerald-400{% else %}bg-amber-500/10 border border-amber-500/30 text-amber-400{% endif %} flex items-center justify-center text-xl flex-shrink-0">
+                    {% if summary.is_present_today %}
+                    <i class="fa-solid fa-badge-check"></i>
+                    {% else %}
+                    <i class="fa-solid fa-clock"></i>
+                    {% endif %}
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h3 class="font-bold text-base text-white">Today's Attendance Status</h3>
+                        <span class="text-xs text-slate-400">({{ today_date }})</span>
+                    </div>
+                    {% if summary.is_present_today %}
+                    <p class="text-xs text-emerald-300 mt-0.5">
+                        <i class="fa-solid fa-circle-check text-emerald-400"></i>
+                        Marked <strong>Present</strong> at <span class="font-mono text-white">{{ summary.today_record.time }}</span>
+                        {% if summary.today_record.confidence %}
+                        &bull; AI Match Confidence: <span class="font-mono text-emerald-400 font-bold">{{ summary.today_record.confidence }}%</span>
+                        {% endif %}
+                    </p>
+                    {% else %}
+                    <p class="text-xs text-amber-300/90 mt-0.5">
+                        <i class="fa-solid fa-clock-rotate-left text-amber-400"></i>
+                        Not checked in yet today. Stand in front of the classroom camera for automatic facial verification.
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <button onclick="window.location.reload()" class="bg-dark-800 hover:bg-slate-800 text-slate-300 border border-slate-700 px-3.5 py-2 rounded-xl text-xs font-medium transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-arrows-rotate text-teal-400"></i> Refresh
+                </button>
+                <a href="{{ url_for('theory') }}" class="bg-dark-800 hover:bg-slate-800 text-slate-300 border border-slate-700 px-3.5 py-2 rounded-xl text-xs font-medium transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-graduation-cap text-indigo-400"></i> How It Works
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Attendance History Table -->
+    <div class="bg-dark-850 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
+        <div class="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+                <h3 class="font-bold text-white text-base">Personal Attendance Records</h3>
+                <p class="text-xs text-slate-400 mt-0.5">Complete history of your verified class attendances</p>
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+                <span class="text-slate-400">Total Entries:</span>
+                <span class="font-bold text-emerald-400 font-mono bg-dark-800 px-2.5 py-1 rounded-lg border border-slate-700">
+                    {{ attendance_records|length }}
+                </span>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-dark-900/80 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
+                    <tr>
+                        <th class="px-5 py-3.5">Record ID</th>
+                        <th class="px-5 py-3.5">Date</th>
+                        <th class="px-5 py-3.5">Time Logged</th>
+                        <th class="px-5 py-3.5">Status</th>
+                        <th class="px-5 py-3.5">AI Confidence</th>
+                        <th class="px-5 py-3.5">Biometric Engine</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60">
+                    {% if attendance_records %}
+                        {% for record in attendance_records %}
+                        <tr class="hover:bg-slate-800/30 transition">
+                            <td class="px-5 py-3.5 font-mono text-slate-400">#{{ record.id }}</td>
+                            <td class="px-5 py-3.5 font-medium text-white">{{ record.date }}</td>
+                            <td class="px-5 py-3.5 font-mono text-slate-300">{{ record.time }}</td>
+                            <td class="px-5 py-3.5">
+                                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    <i class="fa-solid fa-circle-check text-[10px]"></i> {{ record.status }}
+                                </span>
+                            </td>
+                            <td class="px-5 py-3.5">
+                                <div class="flex items-center gap-2">
+                                    <span class="font-mono font-semibold text-emerald-400">{{ record.confidence }}%</span>
+                                    <div class="w-16 bg-slate-800 h-1 rounded-full overflow-hidden">
+                                        <div class="h-full bg-emerald-500" style="width: {{ record.confidence }}%"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-5 py-3.5 text-slate-400">
+                                <span class="bg-dark-800 px-2 py-0.5 rounded text-[10px] font-mono border border-slate-700">YuNet + SFace</span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="6" class="px-5 py-10 text-center text-slate-500">
+                                <i class="fa-solid fa-calendar-xmark text-2xl mb-2 text-slate-600 block"></i>
+                                No attendance records logged yet. Attend a class session in front of the camera to begin.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

@@ -11,9 +11,9 @@ An end-to-end Computer Vision attendance management system powered by **OpenCV D
 - **Automated Attendance Logging**: Automatically logs student name, roll number, department, time, and confidence score.
 - **Strict Duplicate Prevention**: Unique constraint guarantees a student cannot be logged multiple times on the same date.
 - **Modern Web Dashboard**: Glassmorphic dark UI with live streaming MJPEG feed, KPI statistics, and real-time attendance polling.
-- **Student Enrollment Hub**: Add students via live webcam snapshot directly in the browser or via image upload.
-- **Auditing & Analytics**: Date-range filtering, department filtering, per-student attendance percentage calculation, and CSV report export.
-- **Dual Runtime Modes**: Run either as a full web application (`app.py`) or as a native desktop window (`run_desktop.py`).
+- **Multi-Role Authentication Portal**: Dual-role sign-in for **Students** (personal attendance records, stats & export) and **Administrators** (camera engine, roster management & auditing).
+- **Local Authentication**: Students sign in with a locally stored roll number or email; administrators use credentials stored in the local SQLite database. No third-party sign-in is used.
+- **Student Attendance Portal**: Dedicated dashboard for students to check their daily attendance, overall percentage, and export personal attendance reports.
 
 ---
 
@@ -70,6 +70,8 @@ AI_Attendance/
 │
 ├── templates/                  # Frontend HTML templates
 │   ├── base.html               # Base navigation and theme
+│   ├── login.html              # Local Student / Admin authentication
+│   ├── student_portal.html     # Student portal for personal attendance & export
 │   ├── dashboard.html          # Live feed, KPI cards, real-time table
 │   ├── students.html           # Enrollment modal & student directory
 │   ├── reports.html            # Attendance logs, student % & CSV export
@@ -83,6 +85,14 @@ AI_Attendance/
 ---
 
 ## ⚡ How to Run
+
+### Deploy on Render
+
+1. In Render, choose **New** &rarr; **Blueprint** and connect this GitHub repository. Leave **Root Directory** blank.
+2. Render reads `render.yaml` and configures the build and start commands. Enter values for `ADMIN_USERNAME` and `ADMIN_PASSWORD` when prompted; Render generates `FLASK_SECRET_KEY`.
+3. Deploy the free web service.
+
+The free service uses temporary storage, so attendance records and enrolled students may be lost when it restarts. Live recognition requests permission to use the browser device camera and sends sampled frames to the server over HTTPS for processing. Keep in mind that the free service's limited CPU may make recognition slower than running locally.
 
 ### Option 1: Web Dashboard (Recommended)
 
@@ -113,3 +123,7 @@ To run without a web browser directly in a pure OpenCV window:
 python run_desktop.py
 ```
 Press **`q`** or **`ESC`** to exit.
+```Render link
+(
+https://ai-attendance-1-jce2.onrender.com/
+) ```
