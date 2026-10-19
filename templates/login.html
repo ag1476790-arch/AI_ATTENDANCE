@@ -599,6 +599,18 @@
             }
         }
 
+        // Social auth dispatcher (called by Google & GitHub buttons)
+        function handleSocialAuth(provider) {
+            if (provider === 'google') {
+                handleFirebaseGoogleAuth();
+            } else if (provider === 'github') {
+                // GitHub goes through server-side OAuth flow
+                window.location.href = `/auth/github?role=${currentRole}`;
+            } else {
+                showError('Unknown authentication provider: ' + provider);
+            }
+        }
+
         // Initialize state on page load
         document.addEventListener('DOMContentLoaded', () => {
             switchAuthMode(currentMode);
