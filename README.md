@@ -12,8 +12,9 @@ An end-to-end Computer Vision attendance management system powered by **OpenCV D
 - **Strict Duplicate Prevention**: Unique constraint guarantees a student cannot be logged multiple times on the same date.
 - **Modern Web Dashboard**: Glassmorphic dark UI with live streaming MJPEG feed, KPI statistics, and real-time attendance polling.
 - **Multi-Role Authentication Portal**: Dual-role sign-in for **Students** (personal attendance records, stats & export) and **Administrators** (camera engine, roster management & auditing).
-- **Local Authentication**: Students sign in with a locally stored roll number or email; administrators use credentials stored in the local SQLite database. No third-party sign-in is used.
+- **Authentication**: Students can sign in with local credentials or Google/GitHub. Administrators can use local credentials or a linked Google/GitHub account.
 - **Student Attendance Portal**: Dedicated dashboard for students to check their daily attendance, overall percentage, and export personal attendance reports.
+- **Social Profile Completion**: Google/GitHub supplies the verified email and suggested name; the app asks students for their roll number and department before creating a profile.
 
 ---
 
@@ -93,6 +94,12 @@ AI_Attendance/
 3. Deploy the free web service.
 
 The free service uses temporary storage, so attendance records and enrolled students may be lost when it restarts. Live recognition requests permission to use the browser device camera and sends sampled frames to the server over HTTPS for processing. Keep in mind that the free service's limited CPU may make recognition slower than running locally.
+
+### Configure Google and GitHub sign-in
+
+Social sign-in uses Firebase Authentication. In the Firebase console, enable the Google and GitHub providers under **Authentication → Sign-in method**. For GitHub, add a GitHub OAuth app to Firebase using the callback URL shown by Firebase. Add `localhost` and your deployed host to Firebase's authorized domains. Set `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, and the other `FIREBASE_*` web-app settings to values from your Firebase project when they differ from the defaults in this repository.
+
+After provider authentication, students confirm their name and enter their student roll number and department. The verified provider email is used for the account and cannot be changed in the app. Existing local student/admin records can sign in with the same verified email; new administrator social accounts need an administrator username.
 
 ### Option 1: Web Dashboard (Recommended)
 

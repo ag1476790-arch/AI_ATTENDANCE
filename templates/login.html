@@ -453,27 +453,13 @@
                 <span id="modal-error-text" class="flex-1 font-medium"></span>
             </div>
 
-            <!-- Fast 1-Click Action -->
-            <div class="mb-4">
-                <button type="button" id="modal-quick-btn" onclick="executeQuickSocialAuth()"
-                        class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white text-xs font-bold shadow-lg shadow-emerald-500/20 transition flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-bolt text-amber-300"></i>
-                    <span id="modal-quick-btn-text">Instant 1-Click Sign In</span>
-                </button>
-            </div>
-
-            <div class="relative my-4 text-center">
-                <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-slate-800"></div></div>
-                <span class="relative bg-dark-900 px-3 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
-                    Or Customize Details
-                </span>
-            </div>
+            <p class="mb-4 text-xs text-slate-400">
+                Confirm your account details. Your provider email is verified; the remaining profile details are managed by this app.
+            </p>
 
             <!-- Modal Form -->
             <form id="social-modal-form" onsubmit="return handleModalSubmit(event)" class="space-y-3">
-                <input type="hidden" name="provider" id="modal-input-provider" value="google">
                 <input type="hidden" name="role" id="modal-input-role" value="student">
-                <input type="hidden" name="action" id="modal-input-action" value="login">
 
                 <div>
                     <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Full Name</label>
@@ -488,17 +474,38 @@
                     <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Email Address</label>
                     <div class="relative">
                         <i class="fa-solid fa-envelope absolute left-3 top-2.5 text-xs text-slate-500"></i>
-                        <input type="email" name="email" id="modal-input-email" required
-                               class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
+                        <input type="email" id="modal-input-email" readonly
+                               class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-400 cursor-not-allowed">
                     </div>
                 </div>
 
                 <div id="modal-roll-container">
-                    <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Student Roll Number</label>
+                    <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Student Roll Number *</label>
                     <div class="relative">
                         <i class="fa-solid fa-id-badge absolute left-3 top-2.5 text-xs text-slate-500"></i>
-                        <input type="text" name="roll_number" id="modal-input-roll" value="CS-2024-001" placeholder="e.g. CS-2024-001"
+                        <input type="text" name="roll_number" id="modal-input-roll" required placeholder="e.g. CS-2024-001"
                                class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-white uppercase placeholder-slate-500 focus:outline-none focus:border-teal-500 transition">
+                    </div>
+                </div>
+
+                <div id="modal-department-container">
+                    <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Department *</label>
+                    <select name="department" id="modal-input-department" required
+                            class="w-full bg-dark-800 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-teal-500 transition">
+                        <option value="AI & Data Science">AI &amp; Data Science</option>
+                        <option value="Computer Science & Eng">Computer Science &amp; Eng</option>
+                        <option value="Information Technology">Information Technology</option>
+                        <option value="Electronics & Comm">Electronics &amp; Comm</option>
+                        <option value="Mechanical Engineering">Mechanical Engineering</option>
+                    </select>
+                </div>
+
+                <div id="modal-username-container" class="hidden">
+                    <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">Administrator Username *</label>
+                    <div class="relative">
+                        <i class="fa-solid fa-user-shield absolute left-3 top-2.5 text-xs text-slate-500"></i>
+                        <input type="text" name="username" id="modal-input-username"
+                               class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
                     </div>
                 </div>
 
@@ -530,6 +537,7 @@
         // Initialize Firebase SDK with official project credentials
         let firebaseApp = null;
         let auth = null;
+        let pendingFirebaseUser = null;
         try {
             if (typeof firebase !== 'undefined' && firebase.initializeApp) {
                 const config = {
@@ -630,9 +638,11 @@
             const modal = document.getElementById('social-modal');
             if (modal) modal.classList.add('hidden');
             dismissModalError();
+            pendingFirebaseUser = null;
+            if (auth) auth.signOut().catch(err => console.warn('[Firebase sign-out]', err));
         }
 
-        function openSocialModal(provider, role, mode) {
+        function openSocialModal(provider, role, user) {
             dismissError();
             dismissModalError();
 
@@ -642,18 +652,17 @@
             const roleBadge = document.getElementById('modal-role-badge');
             const actionBadge = document.getElementById('modal-action-badge');
             const rollContainer = document.getElementById('modal-roll-container');
-            const quickBtnText = document.getElementById('modal-quick-btn-text');
+            const departmentContainer = document.getElementById('modal-department-container');
+            const usernameContainer = document.getElementById('modal-username-container');
             const nameInput = document.getElementById('modal-input-name');
             const emailInput = document.getElementById('modal-input-email');
             const rollInput = document.getElementById('modal-input-roll');
+            const usernameInput = document.getElementById('modal-input-username');
 
-            const prov = provider || 'google';
-            const r = role || currentRole;
-            const m = mode || currentMode;
-
-            document.getElementById('modal-input-provider').value = prov;
+            const prov = provider === 'github' ? 'github' : 'google';
+            const r = role === 'admin' ? 'admin' : 'student';
+            pendingFirebaseUser = user;
             document.getElementById('modal-input-role').value = r;
-            document.getElementById('modal-input-action').value = m;
 
             const isGoogle = prov === 'google';
             const provName = isGoogle ? 'Google' : 'GitHub';
@@ -669,66 +678,27 @@
                 icon.innerHTML = `<i class="fa-brands fa-github text-2xl text-white"></i>`;
             }
 
-            const isRegister = m === 'register';
-            actionBadge.textContent = isRegister ? '• Register New Account' : '• Instant Sign In';
+            title.textContent = `Complete ${provName} profile`;
+            actionBadge.textContent = '• Add your app profile details';
+            nameInput.value = user.displayName || '';
+            emailInput.value = user.email || '';
+            rollInput.value = '';
+            usernameInput.value = (user.email || '').split('@')[0].replace(/[^a-zA-Z0-9_.-]/g, '');
 
-            if (r === 'admin') {
-                title.textContent = `${isRegister ? 'Register' : 'Sign In'} with ${provName}`;
-                roleBadge.textContent = 'Administrator';
-                roleBadge.className = 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
-                rollContainer.classList.add('hidden');
-
-                nameInput.value = 'System Administrator';
-                emailInput.value = isGoogle ? 'admin.vision@gmail.com' : 'admin.vision@github.com';
-                quickBtnText.textContent = `⚡ 1-Click ${isRegister ? 'Register' : 'Sign In'} as Admin`;
-            } else {
-                title.textContent = `${isRegister ? 'Register' : 'Sign In'} with ${provName}`;
-                roleBadge.textContent = 'Student Portal';
-                roleBadge.className = 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20';
-                rollContainer.classList.remove('hidden');
-
-                nameInput.value = 'Alex Johnson';
-                emailInput.value = isGoogle ? 'alex.student@gmail.com' : 'alex.student@github.com';
-                rollInput.value = 'CS-2024-001';
-                quickBtnText.textContent = `⚡ 1-Click ${isRegister ? 'Register' : 'Sign In'} as Student`;
-            }
+            const isAdmin = r === 'admin';
+            roleBadge.textContent = isAdmin ? 'Administrator' : 'Student Portal';
+            roleBadge.className = isAdmin
+                ? 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                : 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20';
+            rollContainer.classList.toggle('hidden', isAdmin);
+            departmentContainer.classList.toggle('hidden', isAdmin);
+            usernameContainer.classList.toggle('hidden', !isAdmin);
+            rollInput.required = !isAdmin;
+            document.getElementById('modal-input-department').required = !isAdmin;
+            usernameInput.required = isAdmin;
+            document.getElementById('modal-submit-btn-text').textContent = 'Save profile & continue';
 
             modal.classList.remove('hidden');
-        }
-
-        async function executeQuickSocialAuth() {
-            const provider = document.getElementById('modal-input-provider').value;
-            const role = document.getElementById('modal-input-role').value;
-            const action = document.getElementById('modal-input-action').value;
-            const name = document.getElementById('modal-input-name').value;
-            const email = document.getElementById('modal-input-email').value;
-            const roll_number = document.getElementById('modal-input-roll').value;
-
-            const btn = document.getElementById('modal-quick-btn');
-            const originalHtml = btn.innerHTML;
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Authenticating...';
-
-            try {
-                const response = await fetch('/auth/mock_post', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                    body: JSON.stringify({ provider, role, action, name, email, roll_number })
-                });
-                const data = await response.json().catch(() => null);
-
-                if (response.ok && data && data.status) {
-                    window.location.href = data.redirect || '/';
-                } else {
-                    const msg = (data && data.message) ? data.message : 'Social authentication failed.';
-                    showModalError(msg);
-                    btn.disabled = false;
-                    btn.innerHTML = originalHtml;
-                }
-            } catch (err) {
-                console.warn('[Quick auth error]', err);
-                window.location.href = `/auth/mock?provider=${provider}&role=${role}`;
-            }
         }
 
         async function handleModalSubmit(event) {
@@ -746,7 +716,13 @@
             formData.forEach((value, key) => { jsonData[key] = value; });
 
             try {
-                const response = await fetch('/auth/mock_post', {
+                if (!pendingFirebaseUser) {
+                    throw new Error('Your sign-in expired. Please authenticate again.');
+                }
+                jsonData.action = 'register';
+                jsonData.uid = pendingFirebaseUser.uid;
+                jsonData.id_token = await pendingFirebaseUser.getIdToken();
+                const response = await fetch('/api/firebase_auth', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                     body: JSON.stringify(jsonData)
@@ -754,6 +730,7 @@
                 const data = await response.json().catch(() => null);
 
                 if (response.ok && data && data.status) {
+                    pendingFirebaseUser = null;
                     window.location.href = data.redirect || '/';
                 } else {
                     const msg = (data && data.message) ? data.message : 'Authentication failed.';
@@ -762,9 +739,9 @@
                     submitBtn.innerHTML = originalHtml;
                 }
             } catch (err) {
-                console.warn('[Modal submit fallback]', err);
-                form.action = '/auth/mock_post';
-                form.submit();
+                showModalError(err.message || 'Unable to save your profile. Please try again.');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalHtml;
             }
             return false;
         }
@@ -811,27 +788,32 @@
             return false;
         }
 
-        async function handleFirebaseUserSuccess(user, role, mode) {
+        async function handleFirebaseUserSuccess(user, role, mode, provider) {
             const r = role || currentRole;
             const m = mode || currentMode;
-            const isGithub = user.providerData && user.providerData.some(p => p.providerId === 'github.com');
-            const response = await fetch('/api/firebase_auth', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: m,
-                    role: r,
-                    uid: user.uid,
-                    email: user.email || '',
-                    name: user.displayName || user.email?.split('@')[0] || (isGithub ? 'GitHub User' : 'Google User'),
-                })
-            });
-
-            const data = await response.json().catch(() => null);
-            if (data && data.status) {
-                window.location.href = data.redirect || '/';
-            } else {
+            try {
+                const response = await fetch('/api/firebase_auth', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'login',
+                        role: r,
+                        uid: user.uid,
+                        id_token: await user.getIdToken()
+                    })
+                });
+                const data = await response.json().catch(() => null);
+                if (response.ok && data && data.status) {
+                    window.location.href = data.redirect || '/';
+                    return;
+                }
+                if (response.status === 404 && (r === 'student' || m === 'register')) {
+                    openSocialModal(provider, r, user);
+                    return;
+                }
                 showError((data && data.message) ? data.message : 'Firebase authentication failed.');
+            } catch (err) {
+                showError(err.message || 'Unable to verify your sign-in. Please try again.');
             }
         }
 
@@ -862,19 +844,15 @@
                 authProvider.addScope('user:email');
             }
 
-            const startTime = Date.now();
             try {
                 const result = await auth.signInWithPopup(authProvider);
                 if (result && result.user) {
-                    await handleFirebaseUserSuccess(result.user, currentRole, currentMode);
+                    await handleFirebaseUserSuccess(result.user, currentRole, currentMode, provider);
                 }
             } catch (err) {
                 console.warn('[Firebase popup error]', err);
-                const elapsed = Date.now() - startTime;
 
-                // If popup was closed rapidly (< 2.5s) or blocked by browser, seamlessly use direct redirect
-                if (err.code === 'auth/popup-blocked' || (err.code === 'auth/popup-closed-by-user' && elapsed < 2500)) {
-                    console.log('[Popup closed quickly or blocked, falling back to signInWithRedirect]');
+                if (err.code === 'auth/popup-blocked') {
                     try {
                         await auth.signInWithRedirect(authProvider);
                         return;
@@ -918,7 +896,8 @@
                     if (result && result.user) {
                         const savedRole = sessionStorage.getItem('auth_role') || currentRole;
                         const savedMode = sessionStorage.getItem('auth_mode') || currentMode;
-                        await handleFirebaseUserSuccess(result.user, savedRole, savedMode);
+                        const provider = result.user.providerData.some(item => item.providerId === 'github.com') ? 'github' : 'google';
+                        await handleFirebaseUserSuccess(result.user, savedRole, savedMode, provider);
                     }
                 }).catch(err => {
                     console.warn('[Redirect Result Error]', err);

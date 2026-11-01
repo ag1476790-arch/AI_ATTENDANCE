@@ -301,29 +301,59 @@ def register():
 
 @app.route('/api/firebase_auth', methods=['POST'])
 def api_firebase_auth():
-    """
-    JSON API for Firebase Authentication (Google popup or Firebase Email/Password).
-    Synchronizes authenticated user identity with the local database.
-    Strictly checks duplicate registration returning 'Account already registered'.
-    """
+    """Validates a Firebase identity and signs in or registers its local profile."""
     data = request.get_json(silent=True)
     if not data or not isinstance(data, dict):
         return jsonify({'status': False, 'message': 'Invalid JSON request payload.'}), 400
 
-    action = data.get('action', 'login').strip().lower()
-    role = data.get('role', 'student').strip().lower()
-    if role not in ('student', 'admin'):
-        role = 'student'
+    action = str(data.get('action', 'login')).strip().lower()
+    role = str(data.get('role', 'student')).strip().lower()
+    id_token = str(data.get('id_token', '')).strip()
+    if action not in ('login', 'register') or role not in ('student', 'admin'):
+        return jsonify({'status': False, 'message': 'Invalid authentication action or account type.'}), 400
+    if not id_token:
+        return jsonify({'status': False, 'message': 'A Firebase sign-in token is required.'}), 401
+    if not FIREBASE_API_KEY:
+        return jsonify({'status': False, 'message': 'Firebase Authentication is not configured on the server.'}), 503
 
-    uid = data.get('uid', '').strip()
-    email = data.get('email', '').strip()
-    name = data.get('name', '').strip()
-    roll_number = data.get('roll_number', '').strip().upper()
-    department = data.get('department', '').strip()
-    password = data.get('password', '').strip()
+    try:
+        identity_response = requests.post(
+            f'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key={FIREBASE_API_KEY}',
+            json={'idToken': id_token},
+            timeout=10
+        )
+        identity_data = identity_response.json()
+    except requests.RequestException:
+        return jsonify({'status': False, 'message': 'Unable to verify your Firebase sign-in. Please try again.'}), 503
+    except ValueError:
+        return jsonify({'status': False, 'message': 'Firebase returned an invalid identity response.'}), 502
 
-    if not uid and not email:
-        return jsonify({'status': False, 'message': 'Firebase UID or email is required.'}), 400
+    firebase_user = (identity_data.get('users') or [None])[0] if isinstance(identity_data, dict) else None
+    if identity_response.status_code != 200 or not isinstance(firebase_user, dict):
+        return jsonify({'status': False, 'message': 'Your Firebase sign-in could not be verified. Please sign in again.'}), 401
+
+    uid = str(firebase_user.get('localId', '')).strip()
+    email = str(firebase_user.get('email', '')).strip()
+    if not uid or not email or not firebase_user.get('emailVerified'):
+        return jsonify({'status': False, 'message': 'A verified email address is required to continue.'}), 403
+
+    submitted_uid = str(data.get('uid', '')).strip()
+    if submitted_uid and submitted_uid != uid:
+        return jsonify({'status': False, 'message': 'The signed-in account did not match the verified identity.'}), 401
+
+    name = str(data.get('name', '')).strip() or str(firebase_user.get('displayName', '')).strip()
+    provider_info = firebase_user.get('providerUserInfo') or []
+    if not isinstance(provider_info, list):
+        provider_info = []
+    provider_ids = [
+        item.get('providerId')
+        for item in provider_info
+        if isinstance(item, dict)
+    ]
+    provider = 'github' if 'github.com' in provider_ids else 'google' if 'google.com' in provider_ids else 'firebase'
+
+    if action == 'register' and not name:
+        return jsonify({'status': False, 'message': 'Please enter your name to complete registration.'}), 400
 
     if action == 'register':
         if role == 'admin':
@@ -333,45 +363,48 @@ def api_firebase_auth():
             if existing:
                 return jsonify({'status': False, 'message': 'Account already registered'}), 400
 
-            admin_user = name or (email.split('@')[0] if email else 'admin_user')
-            success, msg = database.register_admin(admin_user, password or 'firebase_authenticated', email=email, firebase_uid=uid)
+            admin_user = str(data.get('username', '')).strip()
+            if not admin_user:
+                return jsonify({'status': False, 'message': 'Administrator username is required.'}), 400
+            success, msg = database.register_admin(
+                admin_user, os.urandom(32).hex(), email=email, firebase_uid=uid
+            )
             if not success:
                 return jsonify({'status': False, 'message': msg}), 400
 
             session.clear()
             session['admin_user'] = admin_user
             session['role'] = 'admin'
-            session['auth_provider'] = 'firebase'
+            session['auth_provider'] = provider
             session['user'] = {
                 'name': admin_user,
                 'email': email,
                 'role': 'admin',
-                'provider': 'firebase',
+                'provider': provider,
                 'uid': uid
             }
             return jsonify({'status': True, 'redirect': url_for('dashboard')})
 
         else:  # Student Registration
-            clean_roll = roll_number.strip().upper() if roll_number else ''
-            clean_email = email.strip() if email else ''
+            clean_roll = str(data.get('roll_number', '')).strip().upper()
+            dept = str(data.get('department', '')).strip()
+            if not name or not clean_roll or not dept:
+                return jsonify({'status': False, 'message': 'Name, student roll number, and department are required.'}), 400
 
-            if clean_roll and database.get_student_by_roll(clean_roll):
+            if database.get_student_by_roll(clean_roll):
                 return jsonify({'status': False, 'message': 'Account already registered'}), 400
-            if clean_email and database.get_student_by_email(clean_email):
+            if database.get_student_by_email(email):
                 return jsonify({'status': False, 'message': 'Account already registered'}), 400
             if uid and database.get_student_by_uid(uid):
                 return jsonify({'status': False, 'message': 'Account already registered'}), 400
 
-            assigned_roll = clean_roll or f"STU-{abs(hash(clean_email or uid)) % 9000 + 1000}"
-            dept = department or 'AI & Data Science'
-            stu_name = name or (clean_email.split('@')[0].capitalize() if clean_email else 'Student')
+            stu_name = name
 
             success, msg = database.register_student_user(
                 name=stu_name,
-                roll_number=assigned_roll,
+                roll_number=clean_roll,
                 department=dept,
-                email=clean_email,
-                password=password,
+                email=email,
                 firebase_uid=uid
             )
             if not success:
@@ -379,16 +412,16 @@ def api_firebase_auth():
 
             session.clear()
             session['student_user'] = stu_name
-            session['student_roll'] = assigned_roll
+            session['student_roll'] = clean_roll
             session['role'] = 'student'
-            session['auth_provider'] = 'firebase'
+            session['auth_provider'] = provider
             session['user'] = {
                 'name': stu_name,
-                'roll_number': assigned_roll,
+                'roll_number': clean_roll,
                 'department': dept,
-                'email': clean_email,
+                'email': email,
                 'role': 'student',
-                'provider': 'firebase',
+                'provider': provider,
                 'uid': uid
             }
             return jsonify({'status': True, 'redirect': url_for('student_portal')})
@@ -404,12 +437,12 @@ def api_firebase_auth():
                 session.clear()
                 session['admin_user'] = admin['username']
                 session['role'] = 'admin'
-                session['auth_provider'] = 'firebase'
+                session['auth_provider'] = provider
                 session['user'] = {
                     'name': admin['username'],
                     'role': 'admin',
                     'email': admin.get('email', email),
-                    'provider': 'firebase',
+                    'provider': provider,
                     'uid': uid
                 }
                 return jsonify({'status': True, 'redirect': url_for('dashboard')})
@@ -420,8 +453,6 @@ def api_firebase_auth():
             student = database.get_student_by_uid(uid) if uid else None
             if not student and email:
                 student = database.get_student_by_email(email)
-            if not student and roll_number:
-                student = database.get_student_by_roll(roll_number)
             if student:
                 if not student.get('firebase_uid') and uid:
                     database.link_student_firebase(student['roll_number'], uid)
@@ -429,14 +460,14 @@ def api_firebase_auth():
                 session['student_user'] = student['name']
                 session['student_roll'] = student['roll_number']
                 session['role'] = 'student'
-                session['auth_provider'] = 'firebase'
+                session['auth_provider'] = provider
                 session['user'] = {
                     'name': student['name'],
                     'roll_number': student['roll_number'],
                     'department': student['department'],
                     'email': student.get('email', email),
                     'role': 'student',
-                    'provider': 'firebase',
+                    'provider': provider,
                     'uid': uid
                 }
                 return jsonify({'status': True, 'redirect': url_for('student_portal')})
@@ -496,6 +527,8 @@ def finish_oauth_login(provider, provider_id, email, name, role, avatar=''):
 @app.route('/auth/google')
 def auth_google():
     """Initiates Google OAuth 2.0 flow or fallback simulator."""
+    return redirect(url_for('login', error="Use the Google sign-in button to authenticate."))
+
     role = request.args.get('role', 'student').lower()
     if role not in ('student', 'admin'):
         role = 'student'
@@ -523,6 +556,8 @@ def auth_google():
 @app.route('/auth/google/callback')
 def auth_google_callback():
     """Handles Google OAuth authorization callback."""
+    return redirect(url_for('login', error="This sign-in flow is no longer available. Please use the Google button."))
+
     error = request.args.get('error')
     if error:
         return redirect(url_for('login', error=f"Google authentication cancelled: {error}"))
@@ -570,6 +605,8 @@ def auth_google_callback():
 @app.route('/auth/github')
 def auth_github():
     """Initiates GitHub OAuth 2.0 flow or fallback simulator."""
+    return redirect(url_for('login', error="Use the GitHub sign-in button to authenticate."))
+
     role = request.args.get('role', 'student').lower()
     if role not in ('student', 'admin'):
         role = 'student'
@@ -594,6 +631,8 @@ def auth_github():
 @app.route('/auth/github/callback')
 def auth_github_callback():
     """Handles GitHub OAuth authorization callback."""
+    return redirect(url_for('login', error="This sign-in flow is no longer available. Please use the GitHub button."))
+
     error = request.args.get('error')
     if error:
         return redirect(url_for('login', error=f"GitHub authentication cancelled: {error}"))
@@ -656,6 +695,8 @@ def auth_github_callback():
 @app.route('/auth/mock')
 def mock_auth():
     """Instant 1-Click demo authentication for student or admin."""
+    return redirect(url_for('login', error="Demo social sign-in is disabled. Use Google or GitHub authentication."))
+
     role = request.args.get('role', 'student').lower()
     provider = request.args.get('provider', 'google').lower()
 
@@ -684,6 +725,8 @@ def mock_auth():
 @app.route('/auth/mock_post', methods=['POST'])
 def mock_auth_post():
     """Processes interactive modal submission for simulated social login."""
+    return jsonify({'status': False, 'message': 'Demo social sign-in is disabled.'}), 410
+
     is_json = request.is_json
     payload = request.get_json(silent=True) if is_json else request.form
     if not payload:
