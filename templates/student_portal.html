@@ -86,6 +86,50 @@
         </div>
     </div>
 
+    {% if session.get('role') == 'student' %}
+    <section id="attendance-camera" class="bg-dark-850 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
+        <div class="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+                <h3 class="font-bold text-white text-base">Attendance Camera</h3>
+                <p class="text-xs text-slate-400 mt-1">Start the camera and look toward it to record your attendance.</p>
+            </div>
+            {% if student.embedding and not summary.is_present_today %}
+            <button type="button" id="student-camera-toggle" onclick="toggleStudentCamera()"
+                    class="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold transition flex items-center justify-center gap-2">
+                <i class="fa-solid fa-camera"></i> Start Camera
+            </button>
+            {% elif summary.is_present_today %}
+            <span class="px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
+                <i class="fa-solid fa-circle-check mr-1"></i> Attendance Recorded Today
+            </span>
+            {% endif %}
+        </div>
+        {% if student.embedding %}
+        <div class="grid md:grid-cols-2">
+            <div class="relative bg-black min-h-56 flex items-center justify-center">
+                <video id="student-camera-video" autoplay playsinline muted class="w-full max-h-80 object-contain"></video>
+                <div class="absolute bottom-3 left-3 right-3 rounded-xl bg-dark-900/85 border border-slate-700/70 px-3 py-2 text-xs text-slate-200"
+                     id="student-camera-status" role="status" aria-live="polite">
+                    {% if summary.is_present_today %}
+                    Your attendance has already been recorded today.
+                    {% else %}
+                    Camera is off. Select Start Camera when you are ready.
+                    {% endif %}
+                </div>
+            </div>
+            <div class="p-5 flex flex-col justify-center gap-3">
+                <p class="text-sm text-slate-300">The camera checks only your enrolled face for this student session. It does not give access to the administrator dashboard.</p>
+                <p class="text-xs text-slate-500">Allow camera access when your browser asks. Camera access requires HTTPS or localhost.</p>
+            </div>
+        </div>
+        {% else %}
+        <div class="p-5">
+            <p class="text-sm text-amber-300">Your face photo is not enrolled for attendance recognition yet. Please ask an administrator to enroll your face before using the camera.</p>
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
+
     <!-- Attendance Metrics Grid -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <!-- Metric 1: Overall Percentage -->
@@ -269,4 +313,125 @@
     </div>
 
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% if session.get('role') == 'student' and student.embedding and not summary.is_present_today %}
+<script>
+    let studentCameraStream = null;
+    let studentCameraRunning = false;
+    let studentCameraTimer = null;
+    let studentCameraCanvas = null;
+
+    async function toggleStudentCamera() {
+        if (studentCameraRunning) {
+            stopStudentCamera();
+            return;
+        }
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            showStudentCameraMessage('Camera access requires HTTPS or localhost. Open this page securely and try again.', true);
+            return;
+        }
+
+        const button = document.getElementById('student-camera-toggle');
+        button.disabled = true;
+        try {
+            studentCameraStream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
+            });
+            const video = document.getElementById('student-camera-video');
+            video.srcObject = studentCameraStream;
+            await video.play();
+            studentCameraStream.getVideoTracks()[0].addEventListener('ended', () => {
+                if (studentCameraRunning) {
+                    stopStudentCamera();
+                    showStudentCameraMessage('The camera was disconnected. Start it again when ready.', true);
+                }
+            }, { once: true });
+            studentCameraCanvas = document.createElement('canvas');
+            studentCameraRunning = true;
+            button.innerHTML = '<i class="fa-solid fa-power-off"></i> Stop Camera';
+            showStudentCameraMessage('Camera is on. Look toward the camera for face verification.');
+            processStudentCameraFrame();
+        } catch (error) {
+            stopStudentCamera();
+            const messages = {
+                NotAllowedError: 'Camera permission was denied. Allow access in your browser and try again.',
+                NotFoundError: 'No camera was found. Connect a camera and try again.',
+                NotReadableError: 'The camera is busy in another app. Close it and try again.',
+                SecurityError: 'Camera access requires HTTPS or localhost.'
+            };
+            showStudentCameraMessage(messages[error.name] || `Could not start the camera (${error.name || 'unknown error'}).`, true);
+        } finally {
+            if (!studentCameraRunning && button.isConnected) button.disabled = false;
+        }
+    }
+
+    async function processStudentCameraFrame() {
+        if (!studentCameraRunning) return;
+        const video = document.getElementById('student-camera-video');
+        if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0) {
+            const scale = Math.min(1, 640 / video.videoWidth, 480 / video.videoHeight);
+            studentCameraCanvas.width = Math.round(video.videoWidth * scale);
+            studentCameraCanvas.height = Math.round(video.videoHeight * scale);
+            studentCameraCanvas.getContext('2d').drawImage(
+                video, 0, 0, studentCameraCanvas.width, studentCameraCanvas.height
+            );
+
+            try {
+                const response = await fetch('/api/process_frame', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: studentCameraCanvas.toDataURL('image/jpeg', 0.65) })
+                });
+                const result = await response.json();
+                if (!response.ok || !result.status) {
+                    throw new Error(result.message || 'Attendance camera processing failed.');
+                }
+                if (result.present_today) {
+                    stopStudentCamera();
+                    const button = document.getElementById('student-camera-toggle');
+                    button.disabled = true;
+                    button.innerHTML = '<i class="fa-solid fa-circle-check"></i> Attendance Recorded Today';
+                    showStudentCameraMessage('Your attendance has been recorded successfully.');
+                    return;
+                }
+                showStudentCameraMessage('Looking for your enrolled face. Keep your face clearly visible.');
+            } catch (error) {
+                stopStudentCamera();
+                showStudentCameraMessage(error.message || 'Lost connection while checking attendance.', true);
+                return;
+            }
+        }
+        if (studentCameraRunning) studentCameraTimer = setTimeout(processStudentCameraFrame, 400);
+    }
+
+    function stopStudentCamera() {
+        studentCameraRunning = false;
+        clearTimeout(studentCameraTimer);
+        if (studentCameraStream) {
+            studentCameraStream.getTracks().forEach(track => track.stop());
+            studentCameraStream = null;
+        }
+        const video = document.getElementById('student-camera-video');
+        if (video) video.srcObject = null;
+        const button = document.getElementById('student-camera-toggle');
+        if (button && !button.disabled) {
+            button.innerHTML = '<i class="fa-solid fa-camera"></i> Start Camera';
+        }
+    }
+
+    function showStudentCameraMessage(message, isError = false) {
+        const status = document.getElementById('student-camera-status');
+        if (!status) return;
+        status.textContent = message;
+        status.classList.toggle('text-rose-300', isError);
+        status.classList.toggle('text-slate-200', !isError);
+    }
+
+    window.addEventListener('pagehide', stopStudentCamera);
+</script>
+{% endif %}
 {% endblock %}

@@ -13,7 +13,7 @@ An end-to-end Computer Vision attendance management system powered by **OpenCV D
 - **Modern Web Dashboard**: Glassmorphic dark UI with live streaming MJPEG feed, KPI statistics, and real-time attendance polling.
 - **Multi-Role Authentication Portal**: Dual-role sign-in for **Students** (personal attendance records, stats & export) and **Administrators** (camera engine, roster management & auditing).
 - **Authentication**: Students can sign in with local credentials or Google/GitHub. Administrators can use local credentials or a linked Google/GitHub account.
-- **Student Attendance Portal**: Dedicated dashboard for students to check their daily attendance, overall percentage, and export personal attendance reports.
+- **Student Attendance Portal**: Students can take attendance from their portal camera, which only recognizes their own enrolled face, review their daily attendance and overall percentage, and export personal attendance reports. The administrator dashboard remains separate.
 - **Social Profile Completion**: Google/GitHub supplies the verified email and suggested name; registration asks students for their roll number, department, and a face photo, and administrators for a profile photo. Photos can be captured with the camera or uploaded. Student face templates are used for attendance recognition; login does not ask for registration details again.
 
 ---

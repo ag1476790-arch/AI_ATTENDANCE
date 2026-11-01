@@ -67,6 +67,9 @@
                     <a href="{{ url_for('student_portal') }}" class="px-3.5 py-2 rounded-lg text-sm font-medium transition-all {% if active_page == 'student_portal' %}bg-teal-500/10 text-teal-400 border border-teal-500/20{% else %}text-slate-300 hover:text-white hover:bg-slate-800/60{% endif %}">
                         <i class="fa-solid fa-graduation-cap mr-1.5 text-xs"></i> My Attendance Portal
                     </a>
+                    <a href="{{ url_for('student_portal') }}#attendance-camera" class="px-3.5 py-2 rounded-lg text-sm font-medium transition-all text-slate-300 hover:text-white hover:bg-slate-800/60">
+                        <i class="fa-solid fa-camera mr-1.5 text-xs"></i> Take Attendance
+                    </a>
                     <a href="{{ url_for('theory') }}" class="px-3.5 py-2 rounded-lg text-sm font-medium transition-all {% if active_page == 'theory' %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20{% else %}text-slate-300 hover:text-white hover:bg-slate-800/60{% endif %}">
                         <i class="fa-solid fa-book-open mr-1.5 text-xs"></i> OpenCV Theory
                     </a>

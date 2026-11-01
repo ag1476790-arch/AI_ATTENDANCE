@@ -99,7 +99,7 @@ class AttendanceSystem:
     def stop_camera(self):
         self.video_stream.stop()
 
-    def process_frame(self, frame):
+    def process_frame(self, frame, allowed_roll=None):
         """
         Main pipeline:
         Frame → Face Detection → Face Recognition → Attendance DB Check → HUD Visualization
@@ -136,7 +136,13 @@ class AttendanceSystem:
             feature = self.face_engine.extract_feature(frame, raw_face)
             
             # Match with registered students
-            roll, name, confidence, is_match = self.face_engine.match_face(feature, self.enrolled_students)
+            enrolled_students = self.enrolled_students
+            if allowed_roll is not None:
+                enrolled_students = [
+                    student for student in self.enrolled_students
+                    if student[0] == allowed_roll
+                ]
+            roll, name, confidence, is_match = self.face_engine.match_face(feature, enrolled_students)
 
             if is_match and roll:
                 # Check cooldown to avoid hammering the database

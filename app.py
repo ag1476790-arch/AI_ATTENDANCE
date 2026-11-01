@@ -550,45 +550,23 @@ def logout():
 def student_portal():
     """Personalized attendance portal for students."""
     if session.get('role') != 'student':
-        if session.get('admin_user'):
-            roll = 'CS-2024-001'
-        else:
-            return redirect(url_for('login', role='student', error="Please sign in to access your student attendance portal."))
-    else:
-        roll = session.get('student_roll', 'CS-2024-001')
+        return redirect(url_for('login', role='student', error="Please sign in to access your student attendance portal."))
 
+    roll = session.get('student_roll')
+    if not roll:
+        return redirect(url_for('login', role='student', error="Your student profile could not be found. Please sign in again."))
     summary = database.get_student_summary(roll)
     if not summary:
-        all_students = database.get_all_students()
-        if all_students:
-            roll = all_students[0]['roll_number']
-            session['student_roll'] = roll
-            summary = database.get_student_summary(roll)
+        return redirect(url_for('login', role='student', error="Your student profile could not be found. Please contact an administrator."))
 
     records = database.get_student_attendance(roll)
     today_str = datetime.now().strftime('%A, %B %d, %Y')
 
-    student_info = summary['student'] if summary else {
-        'name': session.get('student_user', 'Student'),
-        'roll_number': roll,
-        'department': 'Computer Science & AI',
-        'email': session.get('user', {}).get('email', ''),
-        'embedding': None,
-        'photo_path': None
-    }
-
     return render_template(
         'student_portal.html',
         active_page='student_portal',
-        student=student_info,
-        summary=summary or {
-            'attendance_rate': 0.0,
-            'present_count': 0,
-            'absent_count': 0,
-            'total_classes': 0,
-            'is_present_today': False,
-            'today_record': None
-        },
+        student=summary['student'],
+        summary=summary,
         attendance_records=records,
         today_date=today_str,
         user_session=session.get('user', {})
@@ -736,6 +714,20 @@ def api_live_status():
 @app.route('/api/process_frame', methods=['POST'])
 def api_process_frame():
     """Process a JPEG frame captured by the user's browser camera."""
+    student_roll = None
+    if session.get('role') == 'student':
+        student_roll = session.get('student_roll')
+        student = database.get_student_by_roll(student_roll) if student_roll else None
+        if not student:
+            return jsonify({'status': False, 'message': 'Your student profile could not be found.'}), 403
+        if not student.get('embedding'):
+            return jsonify({
+                'status': False,
+                'message': 'Your face is not enrolled for attendance yet. Please contact an administrator.'
+            }), 409
+    elif not is_admin():
+        return jsonify({'status': False, 'message': 'Please sign in to use the attendance camera.'}), 401
+
     if request.content_length and request.content_length > 1_500_000:
         return jsonify({'status': False, 'message': 'The camera frame is too large.'}), 413
 
@@ -767,12 +759,16 @@ def api_process_frame():
 
     try:
         with frame_processing_lock:
-            attendance_system.process_frame(frame)
+            attendance_system.process_frame(frame, allowed_roll=student_roll)
     except Exception:
         app.logger.exception("Failed to process a browser camera frame")
         return jsonify({'status': False, 'message': 'The server could not process the camera frame.'}), 500
 
-    return jsonify({'status': True, 'fps': attendance_system.fps})
+    result = {'status': True, 'fps': attendance_system.fps}
+    if student_roll:
+        summary = database.get_student_summary(student_roll)
+        result['present_today'] = bool(summary and summary['is_present_today'])
+    return jsonify(result)
 
 def create_student_face_enrollment(roll_number, image_data):
     """Validate a student photo and save its facial embedding and cropped image."""
