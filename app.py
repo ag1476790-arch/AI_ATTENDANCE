@@ -493,6 +493,9 @@ def auth_google():
     role = request.args.get('role', 'student').lower()
     if role not in ('student', 'admin'):
         role = 'student'
+    mode = request.args.get('mode', 'login').lower()
+    if mode not in ('login', 'register'):
+        mode = 'login'
 
     if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
         redirect_uri = url_for('auth_google_callback', _external=True)
@@ -509,7 +512,7 @@ def auth_google():
         return redirect(f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}")
     else:
         # Launch instant simulator modal
-        return redirect(url_for('login', simulate='1', provider='google', role=role))
+        return redirect(url_for('login', simulate='1', provider='google', role=role, mode=mode))
 
 @app.route('/auth/google/callback')
 def auth_google_callback():
@@ -564,6 +567,9 @@ def auth_github():
     role = request.args.get('role', 'student').lower()
     if role not in ('student', 'admin'):
         role = 'student'
+    mode = request.args.get('mode', 'login').lower()
+    if mode not in ('login', 'register'):
+        mode = 'login'
 
     if GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET:
         redirect_uri = url_for('auth_github_callback', _external=True)
@@ -577,7 +583,7 @@ def auth_github():
         }
         return redirect(f"https://github.com/login/oauth/authorize?{urllib.parse.urlencode(params)}")
     else:
-        return redirect(url_for('login', simulate='1', provider='github', role=role))
+        return redirect(url_for('login', simulate='1', provider='github', role=role, mode=mode))
 
 @app.route('/auth/github/callback')
 def auth_github_callback():
@@ -672,15 +678,86 @@ def mock_auth():
 @app.route('/auth/mock_post', methods=['POST'])
 def mock_auth_post():
     """Processes interactive modal submission for simulated social login."""
-    provider = request.form.get('provider', 'google').lower()
-    role = request.form.get('role', 'student').lower()
-    name = request.form.get('name', '').strip() or ('Alex Johnson' if role == 'student' else 'System Administrator')
-    email = request.form.get('email', '').strip() or f"user@{provider}.com"
-    roll_number = request.form.get('roll_number', '').strip().upper()
+    is_json = request.is_json
+    payload = request.get_json(silent=True) if is_json else request.form
+    if not payload:
+        payload = {}
 
-    if role == 'student' and roll_number:
-        if not database.get_student_by_roll(roll_number):
-            database.add_student(roll_number, name, 'Computer Science & AI', email=email)
+    provider = payload.get('provider', 'google').lower()
+    if provider not in ('google', 'github'):
+        provider = 'google'
+    role = payload.get('role', 'student').lower()
+    if role not in ('student', 'admin'):
+        role = 'student'
+    action = payload.get('action', 'login').lower()
+    name = payload.get('name', '').strip() or ('Alex Johnson' if role == 'student' else 'System Administrator')
+    email = payload.get('email', '').strip() or (f"alex.student@{provider}.com" if role == 'student' else f"admin.vision@{provider}.com")
+    roll_number = payload.get('roll_number', '').strip().upper()
+
+    if action == 'register':
+        if role == 'admin':
+            existing = database.get_admin_by_identifier(email) or database.get_admin_by_identifier(name)
+            if existing:
+                err = "Account already registered"
+                if is_json:
+                    return jsonify({'status': False, 'message': err}), 400
+                return render_template('login.html', error=err, initial_role='admin', initial_mode='register')
+            database.register_admin(name, 'social_account', email=email)
+        else:  # student
+            clean_roll = roll_number or f"STU-{abs(hash(email)) % 9000 + 1000}"
+            if database.get_student_by_roll(clean_roll) or (email and database.get_student_by_email(email)):
+                err = "Account already registered"
+                if is_json:
+                    return jsonify({'status': False, 'message': err}), 400
+                return render_template('login.html', error=err, initial_role='student', initial_mode='register')
+            database.register_student_user(name, clean_roll, 'AI & Data Science', email=email, password='')
+            roll_number = clean_roll
+    else:  # login
+        if role == 'student':
+            if not roll_number:
+                s = database.get_student_by_email(email)
+                if s:
+                    roll_number = s['roll_number']
+                    name = s['name']
+                else:
+                    roll_number = 'CS-2024-001'
+            if not database.get_student_by_roll(roll_number):
+                database.add_student(roll_number, name, 'Computer Science & AI', email=email)
+
+    if is_json:
+        session.clear()
+        if role == 'admin':
+            session['admin_user'] = name
+            session['role'] = 'admin'
+            session['auth_provider'] = provider
+            session['user'] = {
+                'name': name,
+                'email': email,
+                'role': 'admin',
+                'provider': provider,
+                'avatar': ''
+            }
+            database.record_oauth_login(provider, f"sim_{abs(hash(email))}", email, name, 'admin')
+            return jsonify({'status': True, 'redirect': url_for('dashboard')})
+        else:
+            student = database.get_student_by_roll(roll_number) or database.get_student_by_email(email)
+            actual_roll = student['roll_number'] if student else roll_number
+            dept = student['department'] if student else 'Computer Science & AI'
+            session['student_user'] = name
+            session['student_roll'] = actual_roll
+            session['role'] = 'student'
+            session['auth_provider'] = provider
+            session['user'] = {
+                'name': name,
+                'email': email,
+                'roll_number': actual_roll,
+                'department': dept,
+                'role': 'student',
+                'provider': provider,
+                'avatar': ''
+            }
+            database.record_oauth_login(provider, f"sim_{abs(hash(email))}", email, name, 'student', roll_number=actual_roll)
+            return jsonify({'status': True, 'redirect': url_for('student_portal')})
 
     return finish_oauth_login(
         provider=provider,
