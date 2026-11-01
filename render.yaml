@@ -17,4 +17,12 @@ services:
       - key: ADMIN_USERNAME
         value: admin
       - key: ADMIN_PASSWORD
-        generateValue: true
+        value: admin123
+      - key: FIREBASE_PROJECT_ID
+        value: ai-attendance-14ab6
+      - key: FIREBASE_AUTH_DOMAIN
+        value: ai-attendance-14ab6.firebaseapp.com
+      - key: FIREBASE_API_KEY
+        value: AIzaSyB3zHWbnGt9AonsW3eSfmrDwVbIeN9lW8s
+      - key: FIREBASE_APP_ID
+        value: 1:267945466487:web:f90f1263c30756e05d8472

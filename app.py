@@ -1316,7 +1316,7 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', '5000'))
     print("=" * 65)
     print(" VisionAttend - AI Real-Time Facial Attendance System")
-    print(f" Dashboard active on: http://0.0.0.0:{port}")
+    print(f" Dashboard active on: http://localhost:{port}")
     print(" Set ADMIN_USERNAME and ADMIN_PASSWORD before first launch.")
     print("=" * 65)
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

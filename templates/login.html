@@ -284,7 +284,7 @@
                         <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5">Password *</label>
                         <div class="relative">
                             <i class="fa-solid fa-lock absolute left-3.5 top-3 text-xs text-slate-500"></i>
-                            <input type="password" name="password" required value="admin123" placeholder="Enter administrator password"
+                            <inputai-attendance-14ab6.firebaseapp.comtype="password" name="password" required value="admin123" placeholder="Enter administrator password"
                                    class="w-full bg-dark-800 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition">
                         </div>
                     </div>
@@ -811,6 +811,30 @@
             return false;
         }
 
+        async function handleFirebaseUserSuccess(user, role, mode) {
+            const r = role || currentRole;
+            const m = mode || currentMode;
+            const isGithub = user.providerData && user.providerData.some(p => p.providerId === 'github.com');
+            const response = await fetch('/api/firebase_auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: m,
+                    role: r,
+                    uid: user.uid,
+                    email: user.email || '',
+                    name: user.displayName || user.email?.split('@')[0] || (isGithub ? 'GitHub User' : 'Google User'),
+                })
+            });
+
+            const data = await response.json().catch(() => null);
+            if (data && data.status) {
+                window.location.href = data.redirect || '/';
+            } else {
+                showError((data && data.message) ? data.message : 'Firebase authentication failed.');
+            }
+        }
+
         // Social auth dispatcher (called by Google & GitHub buttons)
         async function handleSocialAuth(provider) {
             dismissError();
@@ -818,81 +842,90 @@
             const isGoogle = provider === 'google';
             const isGithub = provider === 'github';
 
-            // Attempt official Firebase popup if auth is initialized
-            if (auth && (isGoogle || isGithub)) {
-                try {
-                    const authProvider = isGoogle 
-                        ? new firebase.auth.GoogleAuthProvider() 
-                        : new firebase.auth.GithubAuthProvider();
-
-                    // Optional scopes
-                    if (isGoogle) {
-                        authProvider.addScope('email');
-                        authProvider.addScope('profile');
-                    } else if (isGithub) {
-                        authProvider.addScope('user:email');
-                    }
-
-                    const result = await auth.signInWithPopup(authProvider);
-                    const user = result.user;
-
-                    // Sync real Firebase user identity with local database & session
-                    const response = await fetch('/api/firebase_auth', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            action: currentMode,
-                            role: currentRole,
-                            uid: user.uid,
-                            email: user.email || '',
-                            name: user.displayName || user.email?.split('@')[0] || (isGithub ? 'GitHub User' : 'Google User'),
-                        })
-                    });
-
-                    const data = await response.json().catch(() => null);
-                    if (data && data.status) {
-                        window.location.href = data.redirect || '/';
-                        return;
-                    } else {
-                        showError((data && data.message) ? data.message : 'Firebase authentication failed.');
-                        return;
-                    }
-                } catch (err) {
-                    console.warn('[Firebase popup error]', err);
-                    if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
-                        // User cancelled the popup
-                        return;
-                    }
-                    if (err.code === 'auth/api-key-not-valid' || err.code === 'auth/invalid-api-key') {
-                        showError('Firebase Web API Key is missing or invalid. Please add your Firebase Web API Key in app.py or .env.');
-                    } else {
-                        showError(err.message || 'Firebase authentication failed.');
-                    }
-                    // Fallback to interactive modal if popup fails
-                    openSocialModal(provider, currentRole, currentMode);
-                    return;
-                }
+            if (!auth || (!isGoogle && !isGithub)) {
+                showError('Firebase Authentication is not available. Please check your connection.');
+                return;
             }
 
-            // Open the interactive social modal as fallback
-            openSocialModal(provider, currentRole, currentMode);
+            sessionStorage.setItem('auth_role', currentRole);
+            sessionStorage.setItem('auth_mode', currentMode);
+
+            const authProvider = isGoogle 
+                ? new firebase.auth.GoogleAuthProvider() 
+                : new firebase.auth.GithubAuthProvider();
+
+            if (isGoogle) {
+                authProvider.addScope('email');
+                authProvider.addScope('profile');
+                authProvider.setCustomParameters({ prompt: 'select_account' });
+            } else if (isGithub) {
+                authProvider.addScope('user:email');
+            }
+
+            const startTime = Date.now();
+            try {
+                const result = await auth.signInWithPopup(authProvider);
+                if (result && result.user) {
+                    await handleFirebaseUserSuccess(result.user, currentRole, currentMode);
+                }
+            } catch (err) {
+                console.warn('[Firebase popup error]', err);
+                const elapsed = Date.now() - startTime;
+
+                // If popup was closed rapidly (< 2.5s) or blocked by browser, seamlessly use direct redirect
+                if (err.code === 'auth/popup-blocked' || (err.code === 'auth/popup-closed-by-user' && elapsed < 2500)) {
+                    console.log('[Popup closed quickly or blocked, falling back to signInWithRedirect]');
+                    try {
+                        await auth.signInWithRedirect(authProvider);
+                        return;
+                    } catch (redirectErr) {
+                        showError(redirectErr.message);
+                        return;
+                    }
+                }
+
+                if (err.code === 'auth/unauthorized-domain') {
+                    showError('Domain unauthorized: Please open http://localhost:5000/login (Firebase authorizes localhost by default, not 127.0.0.1) or add 127.0.0.1 to Firebase Authorized Domains.');
+                } else if (err.code === 'auth/account-exists-with-different-credential') {
+                    showError('An account already exists with the same email address but different sign-in credentials.');
+                } else if (err.code === 'auth/cancelled-popup-request') {
+                    // Ignored
+                } else if (err.code === 'auth/popup-closed-by-user') {
+                    showError('Sign-in window was closed. Click Google or GitHub again to retry.');
+                } else {
+                    showError(err.message || 'Firebase authentication failed.');
+                }
+            }
         }
 
         // Initialize state on page load
         document.addEventListener('DOMContentLoaded', () => {
+            // Automatically ensure user is on localhost (not 127.0.0.1) for Firebase Authorized Domains
+            if (window.location.hostname === '127.0.0.1') {
+                window.location.href = window.location.href.replace('127.0.0.1', 'localhost');
+                return;
+            }
+
             switchAuthMode(currentMode);
             const initialRoleInput = document.querySelector('input[name="role_choice"]:checked');
             if (initialRoleInput) {
                 onRoleChanged(initialRoleInput.value);
             }
 
-            // Detect if redirected with simulate=1 (e.g. from /auth/google or /auth/github)
-            const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.get('simulate') === '1') {
-                const prov = urlParams.get('provider') || 'google';
-                const r = urlParams.get('role') || currentRole;
-                const m = urlParams.get('mode') || currentMode;
-                openSocialModal(prov, r, m);
+            // Check if returning from a signInWithRedirect
+            if (auth) {
+                auth.getRedirectResult().then(async (result) => {
+                    if (result && result.user) {
+                        const savedRole = sessionStorage.getItem('auth_role') || currentRole;
+                        const savedMode = sessionStorage.getItem('auth_mode') || currentMode;
+                        await handleFirebaseUserSuccess(result.user, savedRole, savedMode);
+                    }
+                }).catch(err => {
+                    console.warn('[Redirect Result Error]', err);
+                    if (err.code !== 'auth/popup-closed-by-user') {
+                        showError(err.message || 'Authentication error.');
+                    }
+                });
             }
         });
     </script>
