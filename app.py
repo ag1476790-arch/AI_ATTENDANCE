@@ -36,7 +36,10 @@ GITHUB_CLIENT_SECRET = os.environ.get('GITHUB_CLIENT_SECRET', '').strip()
 # Firebase Authentication configuration
 FIREBASE_PROJECT_ID = os.environ.get('FIREBASE_PROJECT_ID', 'ai-attendance-14ab6').strip()
 FIREBASE_AUTH_DOMAIN = os.environ.get('FIREBASE_AUTH_DOMAIN', 'ai-attendance-14ab6.firebaseapp.com').strip()
-FIREBASE_API_KEY = os.environ.get('FIREBASE_API_KEY', '').strip()
+FIREBASE_API_KEY = os.environ.get('FIREBASE_API_KEY', 'AIzaSyB3zHWbnGt9AonsW3eSfmrDwVbIeN9lW8s').strip()
+FIREBASE_STORAGE_BUCKET = os.environ.get('FIREBASE_STORAGE_BUCKET', 'ai-attendance-14ab6.firebasestorage.app').strip()
+FIREBASE_MESSAGING_SENDER_ID = os.environ.get('FIREBASE_MESSAGING_SENDER_ID', '267945466487').strip()
+FIREBASE_APP_ID = os.environ.get('FIREBASE_APP_ID', '1:267945466487:web:f90f1263c30756e05d8472').strip()
 
 DATASET_DIR = os.path.join(os.path.dirname(__file__), 'dataset')
 os.makedirs(DATASET_DIR, exist_ok=True)
@@ -69,6 +72,9 @@ def inject_context():
         'firebase_project_id': FIREBASE_PROJECT_ID,
         'firebase_auth_domain': FIREBASE_AUTH_DOMAIN,
         'firebase_api_key': FIREBASE_API_KEY,
+        'firebase_storage_bucket': FIREBASE_STORAGE_BUCKET,
+        'firebase_messaging_sender_id': FIREBASE_MESSAGING_SENDER_ID,
+        'firebase_app_id': FIREBASE_APP_ID,
     }
 
 # ----------------------------------------------------

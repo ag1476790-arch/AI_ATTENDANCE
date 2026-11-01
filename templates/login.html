@@ -523,17 +523,22 @@
         const firebaseProjectId = "{{ firebase_project_id }}";
         const firebaseAuthDomain = "{{ firebase_auth_domain }}";
         const firebaseApiKey = "{{ firebase_api_key }}";
+        const firebaseStorageBucket = "{{ firebase_storage_bucket }}";
+        const firebaseMessagingSenderId = "{{ firebase_messaging_sender_id }}";
+        const firebaseAppId = "{{ firebase_app_id }}";
 
-        // Initialize Firebase SDK if configuration exists or with project defaults
+        // Initialize Firebase SDK with official project credentials
         let firebaseApp = null;
         let auth = null;
         try {
             if (typeof firebase !== 'undefined' && firebase.initializeApp) {
                 const config = {
-                    apiKey: firebaseApiKey || "AIzaSyFakeKeyForLocalSimulatorFallback",
-                    authDomain: firebaseAuthDomain || `${firebaseProjectId}.firebaseapp.com`,
+                    apiKey: firebaseApiKey || "AIzaSyB3zHWbnGt9AonsW3eSfmrDwVbIeN9lW8s",
+                    authDomain: firebaseAuthDomain || "ai-attendance-14ab6.firebaseapp.com",
                     projectId: firebaseProjectId || "ai-attendance-14ab6",
-                    storageBucket: `${firebaseProjectId}.appspot.com`
+                    storageBucket: firebaseStorageBucket || "ai-attendance-14ab6.firebasestorage.app",
+                    messagingSenderId: firebaseMessagingSenderId || "267945466487",
+                    appId: firebaseAppId || "1:267945466487:web:f90f1263c30756e05d8472"
                 };
                 firebaseApp = firebase.initializeApp(config);
                 auth = firebase.auth();
@@ -810,12 +815,28 @@
         async function handleSocialAuth(provider) {
             dismissError();
 
-            // If Firebase is configured with real credentials for Google, attempt popup
-            if (provider === 'google' && auth && firebaseApiKey && !firebaseApiKey.includes('FakeKey')) {
+            const isGoogle = provider === 'google';
+            const isGithub = provider === 'github';
+
+            // Attempt official Firebase popup if auth is initialized
+            if (auth && (isGoogle || isGithub)) {
                 try {
-                    const googleProvider = new firebase.auth.GoogleAuthProvider();
-                    const result = await auth.signInWithPopup(googleProvider);
+                    const authProvider = isGoogle 
+                        ? new firebase.auth.GoogleAuthProvider() 
+                        : new firebase.auth.GithubAuthProvider();
+
+                    // Optional scopes
+                    if (isGoogle) {
+                        authProvider.addScope('email');
+                        authProvider.addScope('profile');
+                    } else if (isGithub) {
+                        authProvider.addScope('user:email');
+                    }
+
+                    const result = await auth.signInWithPopup(authProvider);
                     const user = result.user;
+
+                    // Sync real Firebase user identity with local database & session
                     const response = await fetch('/api/firebase_auth', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -823,24 +844,37 @@
                             action: currentMode,
                             role: currentRole,
                             uid: user.uid,
-                            email: user.email,
-                            name: user.displayName || user.email.split('@')[0],
+                            email: user.email || '',
+                            name: user.displayName || user.email?.split('@')[0] || (isGithub ? 'GitHub User' : 'Google User'),
                         })
                     });
-                    const data = await response.json();
-                    if (data.status) {
+
+                    const data = await response.json().catch(() => null);
+                    if (data && data.status) {
                         window.location.href = data.redirect || '/';
                         return;
                     } else {
-                        showError(data.message || 'Firebase authentication failed.');
+                        showError((data && data.message) ? data.message : 'Firebase authentication failed.');
                         return;
                     }
                 } catch (err) {
-                    console.warn('[Firebase popup]', err);
+                    console.warn('[Firebase popup error]', err);
+                    if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+                        // User cancelled the popup
+                        return;
+                    }
+                    if (err.code === 'auth/api-key-not-valid' || err.code === 'auth/invalid-api-key') {
+                        showError('Firebase Web API Key is missing or invalid. Please add your Firebase Web API Key in app.py or .env.');
+                    } else {
+                        showError(err.message || 'Firebase authentication failed.');
+                    }
+                    // Fallback to interactive modal if popup fails
+                    openSocialModal(provider, currentRole, currentMode);
+                    return;
                 }
             }
 
-            // Open the interactive social modal for Google or GitHub
+            // Open the interactive social modal as fallback
             openSocialModal(provider, currentRole, currentMode);
         }
 
