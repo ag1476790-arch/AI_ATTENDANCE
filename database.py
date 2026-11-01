@@ -245,14 +245,17 @@ def has_admin_accounts():
     finally:
         conn.close()
 
-def add_student(roll_number, name, department, email='', embedding=None, photo_path=''):
+def add_student(roll_number, name, department, email='', embedding=None, photo_path='', firebase_uid=''):
     conn = get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute('''
-            INSERT INTO students (roll_number, name, department, email, embedding, photo_path)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (roll_number.strip().upper(), name.strip(), department.strip(), email.strip(), embedding, photo_path))
+            INSERT INTO students (roll_number, name, department, email, embedding, photo_path, firebase_uid)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            roll_number.strip().upper(), name.strip(), department.strip(),
+            email.strip(), embedding, photo_path, firebase_uid.strip()
+        ))
         conn.commit()
         return True, "Student registered successfully."
     except sqlite3.IntegrityError:

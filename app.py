@@ -4,7 +4,6 @@ import re
 import csv
 import base64
 import functools
-import urllib.parse
 from datetime import datetime
 from threading import Lock
 
@@ -26,12 +25,6 @@ app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'visionattend-secr
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
-
-# OAuth Credentials from environment
-GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '').strip()
-GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '').strip()
-GITHUB_CLIENT_ID = os.environ.get('GITHUB_CLIENT_ID', '').strip()
-GITHUB_CLIENT_SECRET = os.environ.get('GITHUB_CLIENT_SECRET', '').strip()
 
 # Firebase Authentication configuration
 FIREBASE_PROJECT_ID = os.environ.get('FIREBASE_PROJECT_ID', 'ai-attendance-14ab6').strip()
@@ -307,10 +300,13 @@ def api_firebase_auth():
         return jsonify({'status': False, 'message': 'Invalid JSON request payload.'}), 400
 
     action = str(data.get('action', 'login')).strip().lower()
+    intent = str(data.get('intent', 'login')).strip().lower()
     role = str(data.get('role', 'student')).strip().lower()
     id_token = str(data.get('id_token', '')).strip()
-    if action not in ('login', 'register') or role not in ('student', 'admin'):
+    if action not in ('login', 'register', 'enroll') or role not in ('student', 'admin'):
         return jsonify({'status': False, 'message': 'Invalid authentication action or account type.'}), 400
+    if action == 'enroll' and role != 'student':
+        return jsonify({'status': False, 'message': 'Biometric enrollment is only available for student accounts.'}), 400
     if not id_token:
         return jsonify({'status': False, 'message': 'A Firebase sign-in token is required.'}), 401
     if not FIREBASE_API_KEY:
@@ -354,6 +350,8 @@ def api_firebase_auth():
 
     if action == 'register' and not name:
         return jsonify({'status': False, 'message': 'Please enter your name to complete registration.'}), 400
+    if action in ('register', 'enroll') and role == 'student' and data.get('biometric_consent') is not True:
+        return jsonify({'status': False, 'message': 'Consent is required to store a face template for attendance.'}), 400
 
     if action == 'register':
         if role == 'admin':
@@ -398,18 +396,32 @@ def api_firebase_auth():
             if uid and database.get_student_by_uid(uid):
                 return jsonify({'status': False, 'message': 'Account already registered'}), 400
 
-            stu_name = name
+            try:
+                embedding, photo_path = create_student_face_enrollment(
+                    clean_roll, data.get('image', '')
+                )
+            except ValueError as exc:
+                return jsonify({'status': False, 'message': str(exc)}), 400
+            except Exception:
+                app.logger.exception("Failed to enroll face for a new social-auth student")
+                return jsonify({'status': False, 'message': 'The face photo could not be processed. Please try another photo.'}), 500
 
-            success, msg = database.register_student_user(
-                name=stu_name,
+            stu_name = name
+            success, msg = database.add_student(
                 roll_number=clean_roll,
+                name=stu_name,
                 department=dept,
                 email=email,
+                embedding=embedding,
+                photo_path=photo_path,
                 firebase_uid=uid
             )
             if not success:
+                if os.path.exists(photo_path):
+                    os.remove(photo_path)
                 return jsonify({'status': False, 'message': msg}), 400
 
+            attendance_system.reload_enrolled_students()
             session.clear()
             session['student_user'] = stu_name
             session['student_roll'] = clean_roll
@@ -426,12 +438,61 @@ def api_firebase_auth():
             }
             return jsonify({'status': True, 'redirect': url_for('student_portal')})
 
+    elif action == 'enroll':
+        student = database.get_student_by_uid(uid) or database.get_student_by_email(email)
+        if not student:
+            return jsonify({'status': False, 'message': 'Student account not found. Please register first.'}), 404
+
+        clean_roll = str(data.get('roll_number', '')).strip().upper()
+        if clean_roll != student['roll_number'].strip().upper():
+            return jsonify({'status': False, 'message': 'The roll number must match your existing student account.'}), 400
+
+        try:
+            embedding, photo_path = create_student_face_enrollment(
+                student['roll_number'], data.get('image', '')
+            )
+        except ValueError as exc:
+            return jsonify({'status': False, 'message': str(exc)}), 400
+        except Exception:
+            app.logger.exception("Failed to enroll face for an existing social-auth student")
+            return jsonify({'status': False, 'message': 'The face photo could not be processed. Please try another photo.'}), 500
+
+        if not database.update_student_embedding(student['roll_number'], embedding, photo_path):
+            if os.path.exists(photo_path):
+                os.remove(photo_path)
+            return jsonify({'status': False, 'message': 'The face template could not be saved. Please try again.'}), 500
+
+        if not student.get('firebase_uid'):
+            database.link_student_firebase(student['roll_number'], uid)
+        attendance_system.reload_enrolled_students()
+        session.clear()
+        session['student_user'] = student['name']
+        session['student_roll'] = student['roll_number']
+        session['role'] = 'student'
+        session['auth_provider'] = provider
+        session['user'] = {
+            'name': student['name'],
+            'roll_number': student['roll_number'],
+            'department': student['department'],
+            'email': student.get('email', email),
+            'role': 'student',
+            'provider': provider,
+            'uid': uid
+        }
+        return jsonify({'status': True, 'redirect': url_for('student_portal')})
+
     else:  # action == 'login'
         if role == 'admin':
             admin = database.get_admin_by_uid(uid) if uid else None
             if not admin and email:
                 admin = database.get_admin_by_identifier(email)
             if admin:
+                if intent == 'register':
+                    return jsonify({
+                        'status': False,
+                        'account_exists': True,
+                        'message': 'This administrator account already exists. Switch to Login to continue.'
+                    }), 409
                 if not admin.get('firebase_uid') and uid:
                     database.link_admin_firebase(admin['username'], uid)
                 session.clear()
@@ -454,6 +515,23 @@ def api_firebase_auth():
             if not student and email:
                 student = database.get_student_by_email(email)
             if student:
+                if intent == 'register':
+                    return jsonify({
+                        'status': False,
+                        'account_exists': True,
+                        'message': 'This student account already exists. Switch to Login to continue.'
+                    }), 409
+                if not student.get('embedding'):
+                    return jsonify({
+                        'status': False,
+                        'needs_profile': True,
+                        'message': 'Capture a face photo to finish setting up your student account.',
+                        'profile': {
+                            'name': student['name'],
+                            'roll_number': student['roll_number'],
+                            'department': student['department']
+                        }
+                    }), 409
                 if not student.get('firebase_uid') and uid:
                     database.link_student_firebase(student['roll_number'], uid)
                 session.clear()
@@ -474,347 +552,30 @@ def api_firebase_auth():
             else:
                 return jsonify({'status': False, 'message': 'Student account not found in database. Please register first.'}), 404
 
-# ----------------------------------------------------
-# Social OAuth Routes (Google & GitHub)
-# ----------------------------------------------------
-def finish_oauth_login(provider, provider_id, email, name, role, avatar=''):
-    """Shared authentication finalize helper for social logins."""
-    role = role.lower() if role in ('student', 'admin') else 'student'
-    session.clear()
-
-    if role == 'admin':
-        session['admin_user'] = name
-        session['role'] = 'admin'
-        session['auth_provider'] = provider
-        session['user'] = {
-            'name': name,
-            'email': email,
-            'role': 'admin',
-            'provider': provider,
-            'avatar': avatar
-        }
-        database.record_oauth_login(provider, provider_id, email, name, 'admin', avatar_url=avatar)
-        return redirect(url_for('dashboard'))
-    else:
-        student = database.get_student_by_email(email)
-        if not student:
-            # Check if default demo student can be claimed, else generate standard ID
-            demo_student = database.get_student_by_roll('CS-2024-001')
-            if demo_student and (not demo_student.get('email') or demo_student.get('email') == email):
-                roll_number = 'CS-2024-001'
-            else:
-                roll_number = f"STU-{abs(hash(email)) % 9000 + 1000}"
-                database.add_student(roll_number, name, 'Computer Science & AI', email=email)
-            student = database.get_student_by_roll(roll_number) or {'roll_number': roll_number, 'name': name, 'department': 'Computer Science & AI'}
-
-        roll_number = student.get('roll_number', 'CS-2024-001')
-        session['student_user'] = name
-        session['student_roll'] = roll_number
-        session['role'] = 'student'
-        session['auth_provider'] = provider
-        session['user'] = {
-            'name': name,
-            'email': email,
-            'roll_number': roll_number,
-            'department': student.get('department', 'Computer Science & AI'),
-            'role': 'student',
-            'provider': provider,
-            'avatar': avatar
-        }
-        database.record_oauth_login(provider, provider_id, email, name, 'student', roll_number=roll_number, avatar_url=avatar)
-        return redirect(url_for('student_portal'))
-
+# Legacy social-auth URLs now direct users to Firebase-backed provider sign-in.
 @app.route('/auth/google')
 def auth_google():
-    """Initiates Google OAuth 2.0 flow or fallback simulator."""
     return redirect(url_for('login', error="Use the Google sign-in button to authenticate."))
-
-    role = request.args.get('role', 'student').lower()
-    if role not in ('student', 'admin'):
-        role = 'student'
-    mode = request.args.get('mode', 'login').lower()
-    if mode not in ('login', 'register'):
-        mode = 'login'
-
-    if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
-        redirect_uri = url_for('auth_google_callback', _external=True)
-        state = f"{role}:{os.urandom(8).hex()}"
-        session['oauth_state'] = state
-        params = {
-            'client_id': GOOGLE_CLIENT_ID,
-            'redirect_uri': redirect_uri,
-            'response_type': 'code',
-            'scope': 'openid email profile',
-            'state': state,
-            'prompt': 'select_account'
-        }
-        return redirect(f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}")
-    else:
-        # Launch instant simulator modal
-        return redirect(url_for('login', simulate='1', provider='google', role=role, mode=mode))
 
 @app.route('/auth/google/callback')
 def auth_google_callback():
-    """Handles Google OAuth authorization callback."""
     return redirect(url_for('login', error="This sign-in flow is no longer available. Please use the Google button."))
-
-    error = request.args.get('error')
-    if error:
-        return redirect(url_for('login', error=f"Google authentication cancelled: {error}"))
-
-    code = request.args.get('code')
-    state = request.args.get('state', '')
-    role = state.split(':')[0] if ':' in state else 'student'
-
-    if not code:
-        return redirect(url_for('login', error="No authorization code received from Google."))
-
-    redirect_uri = url_for('auth_google_callback', _external=True)
-    token_resp = requests.post(
-        'https://oauth2.googleapis.com/token',
-        data={
-            'client_id': GOOGLE_CLIENT_ID,
-            'client_secret': GOOGLE_CLIENT_SECRET,
-            'code': code,
-            'grant_type': 'authorization_code',
-            'redirect_uri': redirect_uri
-        },
-        timeout=10
-    )
-    if token_resp.status_code != 200:
-        return redirect(url_for('login', error="Failed to exchange authorization token with Google."))
-
-    tokens = token_resp.json()
-    access_token = tokens.get('access_token')
-    user_resp = requests.get(
-        'https://www.googleapis.com/oauth2/v2/userinfo',
-        headers={'Authorization': f"Bearer {access_token}"},
-        timeout=10
-    )
-    if user_resp.status_code != 200:
-        return redirect(url_for('login', error="Failed to retrieve Google profile data."))
-
-    user_info = user_resp.json()
-    email = user_info.get('email', '')
-    name = user_info.get('name') or email.split('@')[0].capitalize()
-    google_id = user_info.get('id', '')
-    picture = user_info.get('picture', '')
-
-    return finish_oauth_login(provider='google', provider_id=google_id, email=email, name=name, role=role, avatar=picture)
 
 @app.route('/auth/github')
 def auth_github():
-    """Initiates GitHub OAuth 2.0 flow or fallback simulator."""
     return redirect(url_for('login', error="Use the GitHub sign-in button to authenticate."))
-
-    role = request.args.get('role', 'student').lower()
-    if role not in ('student', 'admin'):
-        role = 'student'
-    mode = request.args.get('mode', 'login').lower()
-    if mode not in ('login', 'register'):
-        mode = 'login'
-
-    if GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET:
-        redirect_uri = url_for('auth_github_callback', _external=True)
-        state = f"{role}:{os.urandom(8).hex()}"
-        session['oauth_state'] = state
-        params = {
-            'client_id': GITHUB_CLIENT_ID,
-            'redirect_uri': redirect_uri,
-            'scope': 'read:user user:email',
-            'state': state
-        }
-        return redirect(f"https://github.com/login/oauth/authorize?{urllib.parse.urlencode(params)}")
-    else:
-        return redirect(url_for('login', simulate='1', provider='github', role=role, mode=mode))
 
 @app.route('/auth/github/callback')
 def auth_github_callback():
-    """Handles GitHub OAuth authorization callback."""
     return redirect(url_for('login', error="This sign-in flow is no longer available. Please use the GitHub button."))
-
-    error = request.args.get('error')
-    if error:
-        return redirect(url_for('login', error=f"GitHub authentication cancelled: {error}"))
-
-    code = request.args.get('code')
-    state = request.args.get('state', '')
-    role = state.split(':')[0] if ':' in state else 'student'
-
-    if not code:
-        return redirect(url_for('login', error="No authorization code received from GitHub."))
-
-    redirect_uri = url_for('auth_github_callback', _external=True)
-    token_resp = requests.post(
-        'https://github.com/login/oauth/access_token',
-        headers={'Accept': 'application/json'},
-        data={
-            'client_id': GITHUB_CLIENT_ID,
-            'client_secret': GITHUB_CLIENT_SECRET,
-            'code': code,
-            'redirect_uri': redirect_uri
-        },
-        timeout=10
-    )
-    if token_resp.status_code != 200:
-        return redirect(url_for('login', error="Failed to exchange authorization token with GitHub."))
-
-    tokens = token_resp.json()
-    access_token = tokens.get('access_token')
-    if not access_token:
-        return redirect(url_for('login', error="GitHub did not grant an access token."))
-
-    user_resp = requests.get(
-        'https://api.github.com/user',
-        headers={'Authorization': f"Bearer {access_token}", 'Accept': 'application/json'},
-        timeout=10
-    )
-    if user_resp.status_code != 200:
-        return redirect(url_for('login', error="Failed to fetch GitHub profile."))
-
-    github_user = user_resp.json()
-    email = github_user.get('email')
-    if not email:
-        emails_resp = requests.get(
-            'https://api.github.com/user/emails',
-            headers={'Authorization': f"Bearer {access_token}", 'Accept': 'application/json'},
-            timeout=10
-        )
-        if emails_resp.status_code == 200:
-            for em in emails_resp.json():
-                if em.get('primary'):
-                    email = em.get('email')
-                    break
-    email = email or f"{github_user.get('login')}@users.noreply.github.com"
-    name = github_user.get('name') or github_user.get('login') or 'GitHub User'
-    github_id = str(github_user.get('id', ''))
-    avatar = github_user.get('avatar_url', '')
-
-    return finish_oauth_login(provider='github', provider_id=github_id, email=email, name=name, role=role, avatar=avatar)
 
 @app.route('/auth/mock')
 def mock_auth():
-    """Instant 1-Click demo authentication for student or admin."""
     return redirect(url_for('login', error="Demo social sign-in is disabled. Use Google or GitHub authentication."))
-
-    role = request.args.get('role', 'student').lower()
-    provider = request.args.get('provider', 'google').lower()
-
-    if role == 'admin':
-        return finish_oauth_login(
-            provider=provider,
-            provider_id=f"demo_admin_{provider}",
-            email=f"admin.vision@{provider}.com",
-            name="System Administrator",
-            role="admin",
-            avatar="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80"
-        )
-    else:
-        student = database.get_student_by_roll('CS-2024-001')
-        name = student['name'] if student else "Alex Johnson"
-        email = student.get('email') if student else f"alex.student@{provider}.com"
-        return finish_oauth_login(
-            provider=provider,
-            provider_id=f"demo_student_{provider}",
-            email=email,
-            name=name,
-            role="student",
-            avatar="https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=256&q=80"
-        )
 
 @app.route('/auth/mock_post', methods=['POST'])
 def mock_auth_post():
-    """Processes interactive modal submission for simulated social login."""
     return jsonify({'status': False, 'message': 'Demo social sign-in is disabled.'}), 410
-
-    is_json = request.is_json
-    payload = request.get_json(silent=True) if is_json else request.form
-    if not payload:
-        payload = {}
-
-    provider = payload.get('provider', 'google').lower()
-    if provider not in ('google', 'github'):
-        provider = 'google'
-    role = payload.get('role', 'student').lower()
-    if role not in ('student', 'admin'):
-        role = 'student'
-    action = payload.get('action', 'login').lower()
-    name = payload.get('name', '').strip() or ('Alex Johnson' if role == 'student' else 'System Administrator')
-    email = payload.get('email', '').strip() or (f"alex.student@{provider}.com" if role == 'student' else f"admin.vision@{provider}.com")
-    roll_number = payload.get('roll_number', '').strip().upper()
-
-    if action == 'register':
-        if role == 'admin':
-            existing = database.get_admin_by_identifier(email) or database.get_admin_by_identifier(name)
-            if existing:
-                err = "Account already registered"
-                if is_json:
-                    return jsonify({'status': False, 'message': err}), 400
-                return render_template('login.html', error=err, initial_role='admin', initial_mode='register')
-            database.register_admin(name, 'social_account', email=email)
-        else:  # student
-            clean_roll = roll_number or f"STU-{abs(hash(email)) % 9000 + 1000}"
-            if database.get_student_by_roll(clean_roll) or (email and database.get_student_by_email(email)):
-                err = "Account already registered"
-                if is_json:
-                    return jsonify({'status': False, 'message': err}), 400
-                return render_template('login.html', error=err, initial_role='student', initial_mode='register')
-            database.register_student_user(name, clean_roll, 'AI & Data Science', email=email, password='')
-            roll_number = clean_roll
-    else:  # login
-        if role == 'student':
-            if not roll_number:
-                s = database.get_student_by_email(email)
-                if s:
-                    roll_number = s['roll_number']
-                    name = s['name']
-                else:
-                    roll_number = 'CS-2024-001'
-            if not database.get_student_by_roll(roll_number):
-                database.add_student(roll_number, name, 'Computer Science & AI', email=email)
-
-    if is_json:
-        session.clear()
-        if role == 'admin':
-            session['admin_user'] = name
-            session['role'] = 'admin'
-            session['auth_provider'] = provider
-            session['user'] = {
-                'name': name,
-                'email': email,
-                'role': 'admin',
-                'provider': provider,
-                'avatar': ''
-            }
-            database.record_oauth_login(provider, f"sim_{abs(hash(email))}", email, name, 'admin')
-            return jsonify({'status': True, 'redirect': url_for('dashboard')})
-        else:
-            student = database.get_student_by_roll(roll_number) or database.get_student_by_email(email)
-            actual_roll = student['roll_number'] if student else roll_number
-            dept = student['department'] if student else 'Computer Science & AI'
-            session['student_user'] = name
-            session['student_roll'] = actual_roll
-            session['role'] = 'student'
-            session['auth_provider'] = provider
-            session['user'] = {
-                'name': name,
-                'email': email,
-                'roll_number': actual_roll,
-                'department': dept,
-                'role': 'student',
-                'provider': provider,
-                'avatar': ''
-            }
-            database.record_oauth_login(provider, f"sim_{abs(hash(email))}", email, name, 'student', roll_number=actual_roll)
-            return jsonify({'status': True, 'redirect': url_for('student_portal')})
-
-    return finish_oauth_login(
-        provider=provider,
-        provider_id=f"sim_{abs(hash(email))}",
-        email=email,
-        name=name,
-        role=role
-    )
 
 @app.route('/logout')
 def logout():
@@ -1051,6 +812,74 @@ def api_process_frame():
         return jsonify({'status': False, 'message': 'The server could not process the camera frame.'}), 500
 
     return jsonify({'status': True, 'fps': attendance_system.fps})
+
+def create_student_face_enrollment(roll_number, image_data):
+    """Validate a student photo and save its facial embedding and cropped image."""
+    clean_roll = roll_number.strip().upper()
+    if not re.fullmatch(r'[A-Z0-9][A-Z0-9._-]{0,39}', clean_roll):
+        raise ValueError('Use a roll number containing only letters, numbers, dots, underscores, or hyphens.')
+    if not isinstance(image_data, str) or not image_data:
+        raise ValueError('Please capture or upload a clear face photo to continue.')
+
+    if image_data.startswith('data:'):
+        header, separator, image_data = image_data.partition(',')
+        if not separator or header.lower() not in (
+            'data:image/jpeg;base64',
+            'data:image/png;base64',
+            'data:image/webp;base64'
+        ):
+            raise ValueError('Upload a JPEG, PNG, or WebP face photo.')
+
+    if len(image_data) > 7_000_000:
+        raise ValueError('The face photo is too large. Please choose a smaller image.')
+    try:
+        image_bytes = base64.b64decode(image_data, validate=True)
+    except (ValueError, base64.binascii.Error) as exc:
+        raise ValueError('The selected face photo is not a valid image.') from exc
+
+    image = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError('The selected face photo could not be opened.')
+
+    height, width = image.shape[:2]
+    if width > 1280 or height > 960:
+        raise ValueError('Face photos must be at most 1280x960 pixels.')
+
+    engine = attendance_system.face_engine
+    faces = engine.detect_faces(image)
+    if not faces:
+        raise ValueError('No face was detected. Use a clear, front-facing photo and try again.')
+
+    face = max(faces, key=lambda item: item['bbox'][2] * item['bbox'][3])
+    embedding = engine.extract_feature(image, face['raw_face'])
+    if embedding is None:
+        raise ValueError('Could not create a face template. Please capture or upload another photo.')
+
+    vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
+    if vector.size != 128 or not np.isfinite(vector).all():
+        raise ValueError('The face recognition model returned an invalid face template.')
+
+    x, y, face_width, face_height = face['bbox']
+    pad_x = int(face_width * 0.2)
+    pad_y = int(face_height * 0.2)
+    crop = image[
+        max(0, y - pad_y):min(height, y + face_height + pad_y),
+        max(0, x - pad_x):min(width, x + face_width + pad_x)
+    ]
+    if crop.size == 0:
+        raise ValueError('The detected face photo is invalid. Please try another image.')
+
+    encoded_ok, encoded_photo = cv2.imencode('.jpg', crop)
+    if not encoded_ok:
+        raise ValueError('The face photo could not be saved. Please try again.')
+
+    filename = f"{clean_roll}-{os.urandom(8).hex()}.jpg"
+    os.makedirs(DATASET_DIR, exist_ok=True)
+    photo_path = os.path.join(DATASET_DIR, filename)
+    with open(photo_path, 'wb') as photo_file:
+        photo_file.write(encoded_photo.tobytes())
+
+    return vector.tobytes(), photo_path
 
 @app.route('/api/register_student', methods=['POST'])
 @admin_required

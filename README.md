@@ -14,7 +14,7 @@ An end-to-end Computer Vision attendance management system powered by **OpenCV D
 - **Multi-Role Authentication Portal**: Dual-role sign-in for **Students** (personal attendance records, stats & export) and **Administrators** (camera engine, roster management & auditing).
 - **Authentication**: Students can sign in with local credentials or Google/GitHub. Administrators can use local credentials or a linked Google/GitHub account.
 - **Student Attendance Portal**: Dedicated dashboard for students to check their daily attendance, overall percentage, and export personal attendance reports.
-- **Social Profile Completion**: Google/GitHub supplies the verified email and suggested name; the app asks students for their roll number and department before creating a profile.
+- **Social Profile Completion**: Google/GitHub supplies the verified email and suggested name; students add their roll number, department, and a face photo using the camera or an upload before the app creates their profile and face template.
 
 ---
 
