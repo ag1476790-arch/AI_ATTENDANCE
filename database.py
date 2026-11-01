@@ -92,6 +92,8 @@ def init_db():
         cursor.execute("ALTER TABLE admins ADD COLUMN email TEXT DEFAULT ''")
     if 'firebase_uid' not in admin_cols:
         cursor.execute("ALTER TABLE admins ADD COLUMN firebase_uid TEXT DEFAULT ''")
+    if 'photo_path' not in admin_cols:
+        cursor.execute("ALTER TABLE admins ADD COLUMN photo_path TEXT DEFAULT ''")
 
     # Create the first admin if none exists
     cursor.execute('SELECT COUNT(*) as count FROM admins')
@@ -396,7 +398,7 @@ def update_student(original_roll, name=None, new_roll=None, department=None, ema
     finally:
         conn.close()
 
-def register_admin(username, password, email=None, firebase_uid=''):
+def register_admin(username, password, email=None, firebase_uid='', photo_path=''):
     """Creates a new administrator account with salted PBKDF2/scrypt password hash."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -425,8 +427,8 @@ def register_admin(username, password, email=None, firebase_uid=''):
                 return False, "Account already registered"
 
         cursor.execute(
-            'INSERT INTO admins (username, password, email, firebase_uid) VALUES (?, ?, ?, ?)',
-            (user, generate_password_hash(pw), em, firebase_uid.strip())
+            'INSERT INTO admins (username, password, email, firebase_uid, photo_path) VALUES (?, ?, ?, ?, ?)',
+            (user, generate_password_hash(pw), em, firebase_uid.strip(), photo_path)
         )
         conn.commit()
         return True, f"Admin account '{user}' registered successfully."
@@ -447,7 +449,7 @@ def get_admin_by_identifier(identifier):
     try:
         clean = identifier.strip().lower()
         cursor.execute(
-            'SELECT id, username, email, firebase_uid, created_at FROM admins WHERE LOWER(username) = ? OR (email != "" AND LOWER(email) = ?)',
+            'SELECT id, username, email, firebase_uid, photo_path, created_at FROM admins WHERE LOWER(username) = ? OR (email != "" AND LOWER(email) = ?)',
             (clean, clean)
         )
         row = cursor.fetchone()
@@ -463,7 +465,7 @@ def get_admin_by_uid(firebase_uid):
     cursor = conn.cursor()
     try:
         cursor.execute(
-            'SELECT id, username, email, firebase_uid, created_at FROM admins WHERE firebase_uid != "" AND firebase_uid = ?',
+            'SELECT id, username, email, firebase_uid, photo_path, created_at FROM admins WHERE firebase_uid != "" AND firebase_uid = ?',
             (firebase_uid.strip(),)
         )
         row = cursor.fetchone()

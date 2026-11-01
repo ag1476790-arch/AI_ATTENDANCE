@@ -502,8 +502,8 @@
                 </div>
 
                 <div id="modal-face-section" class="space-y-2 border-t border-slate-800 pt-3">
-                    <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">Face photo required *</label>
-                    <p class="text-[10px] text-slate-500">The app stores a face template and cropped photo to support attendance recognition.</p>
+                    <label class="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">Profile photo required *</label>
+                    <p id="profile-photo-description" class="text-[10px] text-slate-500">Students use this photo for attendance recognition.</p>
                     <div class="grid grid-cols-2 gap-2">
                         <button type="button" id="profile-camera-tab" onclick="switchProfileCaptureMode('camera')"
                                 class="p-2 rounded-xl border border-emerald-500 bg-emerald-500/10 text-emerald-400 text-xs font-semibold">
@@ -529,15 +529,15 @@
                     </div>
                     <canvas id="profile-photo-canvas" class="hidden"></canvas>
                     <div id="profile-photo-preview-wrap" class="hidden flex items-center gap-3">
-                        <img id="profile-photo-preview" alt="Face photo preview"
+                        <img id="profile-photo-preview" alt="Profile photo preview"
                              class="h-16 w-16 rounded-xl object-cover border border-emerald-500">
                         <button type="button" onclick="clearProfilePhoto()"
                                 class="text-xs text-slate-300 underline">Retake / choose another</button>
                     </div>
                     <p id="profile-photo-status" class="text-[10px] text-slate-400">Allow camera access or choose a photo to continue.</p>
                     <label class="flex items-start gap-2 text-[10px] text-slate-400">
-                        <input type="checkbox" id="profile-biometric-consent" class="mt-0.5 accent-emerald-500">
-                        <span>I agree to save this face template and cropped photo for attendance recognition.</span>
+                        <input type="checkbox" id="profile-photo-consent" class="mt-0.5 accent-emerald-500">
+                        <span id="profile-consent-text">I agree to save this photo for my profile.</span>
                     </label>
                 </div>
 
@@ -728,12 +728,8 @@
                 icon.innerHTML = `<i class="fa-brands fa-github text-2xl text-white"></i>`;
             }
 
-            title.textContent = action === 'enroll'
-                ? 'Finish face enrollment'
-                : `Complete ${provName} profile`;
-            actionBadge.textContent = action === 'enroll'
-                ? '• Face photo required to use attendance'
-                : '• Add your app profile details';
+            title.textContent = `Complete ${provName} profile`;
+            actionBadge.textContent = '• Add your app profile details';
             nameInput.value = profile.name || user.displayName || '';
             emailInput.value = user.email || '';
             rollInput.value = profile.roll_number || '';
@@ -746,24 +742,27 @@
                 : 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20';
             rollContainer.classList.toggle('hidden', isAdmin);
             departmentContainer.classList.toggle('hidden', isAdmin);
-            faceSection.classList.toggle('hidden', isAdmin);
+            faceSection.classList.remove('hidden');
             usernameContainer.classList.toggle('hidden', !isAdmin);
             rollInput.required = !isAdmin;
             departmentInput.required = !isAdmin;
             departmentInput.value = profile.department || 'AI & Data Science';
             usernameInput.required = isAdmin;
-            nameInput.readOnly = action === 'enroll';
-            rollInput.readOnly = action === 'enroll';
-            departmentInput.disabled = action === 'enroll';
+            document.getElementById('profile-photo-description').textContent = isAdmin
+                ? 'Your profile photo will be saved with your administrator account.'
+                : 'Your face template and photo will be saved for attendance recognition.';
+            document.getElementById('profile-consent-text').textContent = isAdmin
+                ? 'I agree to save this photo with my administrator account.'
+                : 'I agree to save this face template and photo for attendance recognition.';
             document.getElementById('modal-submit-btn-text').textContent = 'Save profile & continue';
             document.getElementById('profile-photo-status').textContent =
                 'Allow camera access or choose a photo to continue.';
             document.getElementById('profile-photo-preview-wrap').classList.add('hidden');
             document.getElementById('profile-photo-file').value = '';
-            document.getElementById('profile-biometric-consent').checked = false;
+            document.getElementById('profile-photo-consent').checked = false;
 
             modal.classList.remove('hidden');
-            if (!isAdmin) switchProfileCaptureMode('camera');
+            switchProfileCaptureMode('camera');
         }
 
         function stopProfileCamera() {
@@ -803,10 +802,14 @@
                         document.getElementById('profile-photo-status').textContent =
                             'Center your face and take a clear photo.';
                     } catch (error) {
+                        const messages = {
+                            NotAllowedError: 'Camera permission was denied. Allow access or upload a photo.',
+                            NotFoundError: 'No camera was found. Connect a camera or upload a photo.',
+                            NotReadableError: 'The camera is busy in another app. Close it or upload a photo.',
+                            SecurityError: 'Camera access requires HTTPS or localhost. Upload a photo instead.'
+                        };
                         document.getElementById('profile-photo-status').textContent =
-                            error.name === 'NotAllowedError'
-                                ? 'Camera permission was denied. Allow access or upload a photo.'
-                                : 'Camera is unavailable. Try uploading a photo instead.';
+                            messages[error.name] || `Camera is unavailable (${error.name || 'unknown error'}). Upload a photo instead.`;
                     }
                 }
             } else {
@@ -822,7 +825,7 @@
             pendingFaceImage = imageData;
             document.getElementById('profile-photo-preview').src = imageData;
             document.getElementById('profile-photo-preview-wrap').classList.remove('hidden');
-            document.getElementById('profile-photo-status').textContent = 'Face photo ready to save.';
+            document.getElementById('profile-photo-status').textContent = 'Profile photo ready to save.';
         }
 
         function captureProfilePhoto() {
@@ -895,14 +898,15 @@
                 }
                 jsonData.uid = pendingFirebaseUser.uid;
                 jsonData.id_token = await pendingFirebaseUser.getIdToken();
+                if (!pendingFaceImage) {
+                    throw new Error('Please take a profile photo or upload one to continue.');
+                }
+                if (!document.getElementById('profile-photo-consent').checked) {
+                    throw new Error('Please confirm consent to save your profile photo.');
+                }
+                jsonData.image = pendingFaceImage;
+                jsonData.photo_consent = true;
                 if (jsonData.role === 'student') {
-                    if (!pendingFaceImage) {
-                        throw new Error('Please take a face photo or upload one to continue.');
-                    }
-                    if (!document.getElementById('profile-biometric-consent').checked) {
-                        throw new Error('Please confirm consent to store your face template for attendance.');
-                    }
-                    jsonData.image = pendingFaceImage;
                     jsonData.biometric_consent = true;
                 }
                 const response = await fetch('/api/firebase_auth', {
@@ -996,11 +1000,7 @@
                     showError(data.message);
                     return;
                 }
-                if (response.status === 409 && data && data.needs_profile) {
-                    openSocialModal(provider, r, user, data.profile || {}, 'enroll');
-                    return;
-                }
-                if (response.status === 404 && (r === 'student' || m === 'register')) {
+                if (response.status === 404 && m === 'register') {
                     openSocialModal(provider, r, user, {}, 'register');
                     return;
                 }

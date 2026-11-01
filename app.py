@@ -303,10 +303,12 @@ def api_firebase_auth():
     intent = str(data.get('intent', 'login')).strip().lower()
     role = str(data.get('role', 'student')).strip().lower()
     id_token = str(data.get('id_token', '')).strip()
-    if action not in ('login', 'register', 'enroll') or role not in ('student', 'admin'):
+    if (
+        action not in ('login', 'register')
+        or role not in ('student', 'admin')
+        or intent not in ('login', 'register')
+    ):
         return jsonify({'status': False, 'message': 'Invalid authentication action or account type.'}), 400
-    if action == 'enroll' and role != 'student':
-        return jsonify({'status': False, 'message': 'Biometric enrollment is only available for student accounts.'}), 400
     if not id_token:
         return jsonify({'status': False, 'message': 'A Firebase sign-in token is required.'}), 401
     if not FIREBASE_API_KEY:
@@ -350,7 +352,9 @@ def api_firebase_auth():
 
     if action == 'register' and not name:
         return jsonify({'status': False, 'message': 'Please enter your name to complete registration.'}), 400
-    if action in ('register', 'enroll') and role == 'student' and data.get('biometric_consent') is not True:
+    if action == 'register' and data.get('photo_consent') is not True:
+        return jsonify({'status': False, 'message': 'Consent is required to save your profile photo.'}), 400
+    if action == 'register' and role == 'student' and data.get('biometric_consent') is not True:
         return jsonify({'status': False, 'message': 'Consent is required to store a face template for attendance.'}), 400
 
     if action == 'register':
@@ -364,10 +368,21 @@ def api_firebase_auth():
             admin_user = str(data.get('username', '')).strip()
             if not admin_user:
                 return jsonify({'status': False, 'message': 'Administrator username is required.'}), 400
+            try:
+                _, photo_path = create_student_face_enrollment('ADMIN', data.get('image', ''))
+            except ValueError as exc:
+                return jsonify({'status': False, 'message': str(exc)}), 400
+            except Exception:
+                app.logger.exception("Failed to save profile photo for a new social-auth administrator")
+                return jsonify({'status': False, 'message': 'The profile photo could not be processed. Please try another photo.'}), 500
+
             success, msg = database.register_admin(
-                admin_user, os.urandom(32).hex(), email=email, firebase_uid=uid
+                admin_user, os.urandom(32).hex(), email=email, firebase_uid=uid,
+                photo_path=photo_path
             )
             if not success:
+                if os.path.exists(photo_path):
+                    os.remove(photo_path)
                 return jsonify({'status': False, 'message': msg}), 400
 
             session.clear()
@@ -438,49 +453,6 @@ def api_firebase_auth():
             }
             return jsonify({'status': True, 'redirect': url_for('student_portal')})
 
-    elif action == 'enroll':
-        student = database.get_student_by_uid(uid) or database.get_student_by_email(email)
-        if not student:
-            return jsonify({'status': False, 'message': 'Student account not found. Please register first.'}), 404
-
-        clean_roll = str(data.get('roll_number', '')).strip().upper()
-        if clean_roll != student['roll_number'].strip().upper():
-            return jsonify({'status': False, 'message': 'The roll number must match your existing student account.'}), 400
-
-        try:
-            embedding, photo_path = create_student_face_enrollment(
-                student['roll_number'], data.get('image', '')
-            )
-        except ValueError as exc:
-            return jsonify({'status': False, 'message': str(exc)}), 400
-        except Exception:
-            app.logger.exception("Failed to enroll face for an existing social-auth student")
-            return jsonify({'status': False, 'message': 'The face photo could not be processed. Please try another photo.'}), 500
-
-        if not database.update_student_embedding(student['roll_number'], embedding, photo_path):
-            if os.path.exists(photo_path):
-                os.remove(photo_path)
-            return jsonify({'status': False, 'message': 'The face template could not be saved. Please try again.'}), 500
-
-        if not student.get('firebase_uid'):
-            database.link_student_firebase(student['roll_number'], uid)
-        attendance_system.reload_enrolled_students()
-        session.clear()
-        session['student_user'] = student['name']
-        session['student_roll'] = student['roll_number']
-        session['role'] = 'student'
-        session['auth_provider'] = provider
-        session['user'] = {
-            'name': student['name'],
-            'roll_number': student['roll_number'],
-            'department': student['department'],
-            'email': student.get('email', email),
-            'role': 'student',
-            'provider': provider,
-            'uid': uid
-        }
-        return jsonify({'status': True, 'redirect': url_for('student_portal')})
-
     else:  # action == 'login'
         if role == 'admin':
             admin = database.get_admin_by_uid(uid) if uid else None
@@ -491,7 +463,7 @@ def api_firebase_auth():
                     return jsonify({
                         'status': False,
                         'account_exists': True,
-                        'message': 'This administrator account already exists. Switch to Login to continue.'
+                        'message': 'Account already registered. Switch to Login to continue.'
                     }), 409
                 if not admin.get('firebase_uid') and uid:
                     database.link_admin_firebase(admin['username'], uid)
@@ -519,18 +491,7 @@ def api_firebase_auth():
                     return jsonify({
                         'status': False,
                         'account_exists': True,
-                        'message': 'This student account already exists. Switch to Login to continue.'
-                    }), 409
-                if not student.get('embedding'):
-                    return jsonify({
-                        'status': False,
-                        'needs_profile': True,
-                        'message': 'Capture a face photo to finish setting up your student account.',
-                        'profile': {
-                            'name': student['name'],
-                            'roll_number': student['roll_number'],
-                            'department': student['department']
-                        }
+                        'message': 'Account already registered. Switch to Login to continue.'
                     }), 409
                 if not student.get('firebase_uid') and uid:
                     database.link_student_firebase(student['roll_number'], uid)

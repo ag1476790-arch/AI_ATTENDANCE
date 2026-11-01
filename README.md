@@ -14,7 +14,7 @@ An end-to-end Computer Vision attendance management system powered by **OpenCV D
 - **Multi-Role Authentication Portal**: Dual-role sign-in for **Students** (personal attendance records, stats & export) and **Administrators** (camera engine, roster management & auditing).
 - **Authentication**: Students can sign in with local credentials or Google/GitHub. Administrators can use local credentials or a linked Google/GitHub account.
 - **Student Attendance Portal**: Dedicated dashboard for students to check their daily attendance, overall percentage, and export personal attendance reports.
-- **Social Profile Completion**: Google/GitHub supplies the verified email and suggested name; students add their roll number, department, and a face photo using the camera or an upload before the app creates their profile and face template.
+- **Social Profile Completion**: Google/GitHub supplies the verified email and suggested name; registration asks students for their roll number, department, and a face photo, and administrators for a profile photo. Photos can be captured with the camera or uploaded. Student face templates are used for attendance recognition; login does not ask for registration details again.
 
 ---
 
@@ -63,7 +63,7 @@ AI_Attendance/
 ├── run_desktop.py              # Standalone OpenCV desktop window runner
 ├── requirements.txt            # Python dependencies
 │
-├── dataset/                    # Stored cropped student face photos
+├── dataset/                    # Stored profile photos and enrolled student face images
 ├── models/                     # ONNX Neural Network models
 │   ├── face_detection_yunet.onnx
 │   ├── face_recognition_sface.onnx
